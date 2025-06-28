@@ -1,0 +1,41 @@
+# EdgeWatch - Decentralized Edge Monitoring System
+# Core dependencies for distributed monitoring and communication
+
+# Web framework for REST API endpoints
+Flask==2.3.3
+Werkzeug==2.3.7
+
+# System monitoring and metrics collection
+psutil==5.9.5
+
+# HTTP client for inter-node communication
+requests==2.31.0
+
+# Database connectivity
+SQLAlchemy==2.0.21
+
+# Configuration management
+configparser
+
+# Logging and utilities
+colorlog==6.7.0
+
+# Data serialization
+jsonschema==4.19.1
+
+# Networking utilities
+netifaces==0.11.0
+
+# Development and testing (optional)
+pytest==7.4.2
+pytest-cov==4.1.0
+
+# Async support
+aiohttp==3.8.6
+asyncio
+
+# Performance monitoring
+prometheus-client==0.17.1
+
+# Security
+cryptography==41.0.4
