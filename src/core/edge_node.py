@@ -4,12 +4,14 @@ import time
 import psutil
 import requests
 from .config_manager import ConfigManager
+from .utils import get_logger, SystemUtils, NetworkUtils
 import logging
 import hashlib
 import json
 import math
+import threading
 
-logger = logging.getLogger("edgewatch.metrics")
+logger = get_logger("edge_node")
 
 # Define priority levels and update frequencies
 PRIORITY_HIGH = 1     # Update every round
@@ -160,10 +162,13 @@ class EdgeNode:
     
     _instance = None
     _initialized = False
+    _lock = threading.Lock()
     
     def __new__(cls):
         if cls._instance is None:
-            cls._instance = super(EdgeNode, cls).__new__(cls)
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super(EdgeNode, cls).__new__(cls)
         return cls._instance
     
     @classmethod
@@ -176,26 +181,163 @@ class EdgeNode:
         if self._initialized:
             return
         
+        # Initialize configuration manager
+        self.config = ConfigManager.instance()
+        
+        # Node identification
         self.ip = None
         self.port = None
-        self.cycle = None
-        self.node_list = None
-        self.data = None
-        self.data_flow_per_round = None
-        self.is_alive = None
-        self.gossip_counter = None
-        self.failure_counter = None
+        self.node_id = None
+        
+        # Communication state
+        self.cycle = 0
+        self.gossip_counter = 0
+        self.failure_counter = 0
         self.failure_list = []
+        self.is_alive = False
+        
+        # Data management
+        self.node_list = {}
+        self.data = {}
+        self.data_flow_per_round = {}
+        self.metric_last_sent = {}
+        
+        # Network configuration
         self.monitoring_address = None
         self.database_address = None
+        self.client_port = None
+        self.push_mode = "0"
+        self.is_send_data_back = False
+        
+        # Threading
         self.client_thread = None
         self.counter_thread = None
-        self.data_flow_per_round = None
         self.session_to_monitoring = requests.Session()
-        self.push_mode = None
-        self.is_send_data_back = None
-        self.metric_last_sent = {}  # Track when each metric was last sent
+        
+        # Performance tracking
+        self.performance_stats = {
+            'messages_sent': 0,
+            'messages_received': 0,
+            'bytes_transmitted': 0,
+            'failed_connections': 0,
+            'startup_time': time.time()
+        }
+        
         self._initialized = True
+        logger.info("EdgeWatch node initialized")
+    
+    def initialize_from_config(self, config_file=None):
+        """Initialize node from configuration file"""
+        try:
+            if config_file:
+                self.config.load_config_file(config_file)
+            
+            # Load network configuration
+            self.ip = self.config.get('Network', 'default_ip', NetworkUtils.get_local_ip())
+            self.port = self.config.get_int('Network', 'default_port', 8080)
+            self.client_port = self.config.get_int('Network', 'client_port', 5000)
+            
+            # Load monitoring configuration
+            self.monitoring_address = self.config.get('Monitoring', 'server_address', 'localhost')
+            self.database_address = self.config.get('Storage', 'database_address', 'localhost')
+            self.push_mode = self.config.get('Monitoring', 'push_mode', '0')
+            self.is_send_data_back = self.config.get_boolean('Monitoring', 'send_data_back', False)
+            
+            # Generate unique node ID
+            self.node_id = f"{self.ip}:{self.port}"
+            
+            # Initialize data structures
+            self.data = {}
+            self.data_flow_per_round = {}
+            
+            logger.info(f"Node configured - ID: {self.node_id}, Push Mode: {self.push_mode}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize from config: {e}")
+            return False
+    
+    def get_node_status(self):
+        """Get comprehensive node status information"""
+        system_info = SystemUtils.get_system_info()
+        
+        return {
+            'node_id': self.node_id,
+            'ip': self.ip,
+            'port': self.port,
+            'is_alive': self.is_alive,
+            'cycle': self.cycle,
+            'gossip_counter': self.gossip_counter,
+            'failure_counter': self.failure_counter,
+            'connected_nodes': len(self.node_list),
+            'data_entries': len(self.data),
+            'push_mode': self.push_mode,
+            'performance': self.performance_stats.copy(),
+            'system': {
+                'cpu_count': system_info['cpu_count'],
+                'memory_total': SystemUtils.format_bytes(system_info['memory_total']),
+                'platform': system_info['platform'],
+                'uptime': SystemUtils.format_duration(time.time() - self.performance_stats['startup_time'])
+            }
+        }
+    
+    def add_peer_node(self, ip, port):
+        """Add a peer node to the network"""
+        node_key = f"{ip}:{port}"
+        if node_key != self.node_id:
+            self.node_list[node_key] = {
+                'ip': ip,
+                'port': port,
+                'last_seen': time.time(),
+                'failure_count': 0
+            }
+            logger.info(f"Added peer node: {node_key}")
+            return True
+        return False
+    
+    def remove_peer_node(self, ip, port):
+        """Remove a peer node from the network"""
+        node_key = f"{ip}:{port}"
+        if node_key in self.node_list:
+            del self.node_list[node_key]
+            logger.info(f"Removed peer node: {node_key}")
+            return True
+        return False
+    
+    def start_monitoring(self, target_count=3, gossip_rate=2.0):
+        """Start the monitoring process with improved error handling"""
+        try:
+            if not self.is_alive:
+                self.is_alive = True
+                
+                # Start gossip counter thread
+                self.counter_thread = threading.Thread(
+                    target=self.start_gossip_counter,
+                    daemon=True
+                )
+                self.counter_thread.start()
+                
+                # Start main gossip loop
+                logger.info(f"Starting EdgeWatch monitoring - Target: {target_count}, Rate: {gossip_rate}s")
+                self.start_gossiping(target_count, gossip_rate)
+                
+        except KeyboardInterrupt:
+            logger.info("Received shutdown signal")
+            self.stop_monitoring()
+        except Exception as e:
+            logger.error(f"Error in monitoring process: {e}")
+            self.stop_monitoring()
+    
+    def stop_monitoring(self):
+        """Stop the monitoring process gracefully"""
+        self.is_alive = False
+        logger.info("EdgeWatch monitoring stopped")
+        
+        # Log final statistics
+        status = self.get_node_status()
+        logger.info(f"Final stats - Messages sent: {status['performance']['messages_sent']}, "
+                   f"Messages received: {status['performance']['messages_received']}, "
+                   f"Uptime: {status['system']['uptime']}")
 
     def start_gossip_counter(self):
         """Start the gossip counter thread"""
