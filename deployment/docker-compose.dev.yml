@@ -1,0 +1,64 @@
+version: '3.8'
+
+services:
+  edgewatch-dev:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.dev
+    container_name: edgewatch-dev
+    hostname: edgewatch-dev
+    ports:
+      - "5000:5000"    # Main EdgeWatch API
+      - "8080:8080"    # Dashboard interface
+      - "9090:9090"    # Metrics endpoint
+    environment:
+      - EDGEWATCH_ENV=development
+      - EDGEWATCH_NODE_ID=dev-node-001
+      - EDGEWATCH_DEBUG=true
+      - DATABASE_URL=sqlite:///data/edgewatch_dev.db
+      - LOG_LEVEL=DEBUG
+    volumes:
+      - ../src:/app/src
+      - ../config:/app/config
+      - edgewatch_dev_data:/app/data
+      - edgewatch_dev_logs:/app/logs
+    networks:
+      - edgewatch-dev-network
+    restart: unless-stopped
+    command: ["python", "-m", "src.core.edgewatch_daemon", "--debug"]
+
+  edgewatch-dev-db:
+    image: postgres:15-alpine
+    container_name: edgewatch-dev-db
+    environment:
+      - POSTGRES_DB=edgewatch_dev
+      - POSTGRES_USER=edgewatch_dev
+      - POSTGRES_PASSWORD=dev_password
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+    networks:
+      - edgewatch-dev-network
+    ports:
+      - "5433:5432"
+    restart: unless-stopped
+
+  edgewatch-dev-redis:
+    image: redis:7.0-alpine
+    container_name: edgewatch-dev-redis
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_dev_data:/data
+    networks:
+      - edgewatch-dev-network
+    restart: unless-stopped
+
+volumes:
+  edgewatch_dev_data:
+  edgewatch_dev_logs:
+  postgres_dev_data:
+  redis_dev_data:
+
+networks:
+  edgewatch-dev-network:
+    driver: bridge
