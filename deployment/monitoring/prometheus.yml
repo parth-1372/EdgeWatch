@@ -1,0 +1,52 @@
+# Prometheus configuration for EdgeWatch
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - "rules/*.yml"
+
+scrape_configs:
+  # EdgeWatch primary node
+  - job_name: 'edgewatch-primary'
+    static_configs:
+      - targets: ['edgewatch-primary:9090']
+    scrape_interval: 10s
+    metrics_path: /metrics
+    
+  # EdgeWatch secondary node
+  - job_name: 'edgewatch-secondary'
+    static_configs:
+      - targets: ['edgewatch-secondary:9090']
+    scrape_interval: 10s
+    metrics_path: /metrics
+    
+  # System metrics from node exporter (if available)
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+    scrape_interval: 15s
+    
+  # Database metrics
+  - job_name: 'postgres-exporter'
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+    scrape_interval: 30s
+    
+  # Redis metrics
+  - job_name: 'redis-exporter'
+    static_configs:
+      - targets: ['redis-exporter:9121']
+    scrape_interval: 30s
+    
+  # Nginx metrics
+  - job_name: 'nginx-exporter'
+    static_configs:
+      - targets: ['nginx-exporter:9113']
+    scrape_interval: 30s
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - alertmanager:9093
