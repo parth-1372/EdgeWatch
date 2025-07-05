@@ -1,0 +1,28 @@
+# EdgeWatch Grafana Datasources Configuration
+# Automated datasource provisioning
+
+apiVersion: 1
+
+datasources:
+  - name: EdgeWatch Prometheus
+    type: prometheus
+    access: proxy
+    url: http://edgewatch-prometheus:9090
+    isDefault: true
+    editable: true
+    orgId: 1
+    
+  - name: EdgeWatch Database
+    type: postgres
+    url: edgewatch-database:5432
+    database: edgewatch
+    user: edgewatch
+    secureJsonData:
+      password: edgewatch_secure_pass_2025
+    jsonData:
+      sslmode: disable
+      maxOpenConns: 10
+      maxIdleConns: 5
+      connMaxLifetime: 14400
+    orgId: 1
+    editable: true
