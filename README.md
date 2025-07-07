@@ -44,6 +44,13 @@ EdgeWatch is an intelligent monitoring platform designed specifically for edge c
 4. **Access the dashboard**
    Open http://localhost:8080 in your browser
 
+5. **View monitoring results and plots**
+   - **EdgeWatch Dashboard**: http://localhost:8080 (real-time monitoring)
+   - **Grafana Analytics**: http://localhost:3000 (admin/edgewatch_admin_2025)
+   - **Prometheus Metrics**: http://localhost:9000 (raw metrics)
+   
+   📊 **[Complete Monitoring Guide](docs/user/monitoring-access.md)** - Detailed guide on accessing dashboards and plots
+
 ### Quick Configuration
 
 ```bash
@@ -180,6 +187,7 @@ Comprehensive documentation is available in the `/docs` directory:
 ### User Documentation
 - 🚀 **[Quick Start Guide](docs/user/quickstart.md)** - Get up and running in minutes
 - 📦 **[Installation Guide](docs/user/installation.md)** - Detailed installation instructions
+- 📊 **[Monitoring Access Guide](docs/user/monitoring-access.md)** - How to view dashboards and plots
 - ❓ **[FAQ](docs/user/faq.md)** - Frequently asked questions
 - 🔧 **[Troubleshooting](docs/user/troubleshooting.md)** - Common issues and solutions
 - ⚡ **[Performance Tuning](docs/user/performance.md)** - Optimization guidelines

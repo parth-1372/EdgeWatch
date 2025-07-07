@@ -200,13 +200,16 @@ show_status() {
     docker-compose -f docker-compose.yml ps
     
     echo ""
-    echo -e "${GREEN}EdgeWatch Services:${NC}"
-    echo "  Primary Node:    http://localhost:5000"
-    echo "  Secondary Node:  http://localhost:5001"
-    echo "  Dashboard:       http://localhost:8080"
-    echo "  Grafana:         http://localhost:3000 (admin/edgewatch_admin_2025)"
-    echo "  Prometheus:      http://localhost:9000"
-    echo "  Nginx:           http://localhost:80"
+    echo -e "${GREEN}🎯 EdgeWatch Monitoring Access URLs:${NC}"
+    echo "  📊 Main Dashboard:       http://localhost:8080 (real-time monitoring)"
+    echo "  📈 Analytics (Grafana):  http://localhost:3000 (admin/edgewatch_admin_2025)"
+    echo "  📋 Metrics (Prometheus): http://localhost:9000 (raw metrics & queries)"
+    echo "  🔌 Primary API:          http://localhost:5000"
+    echo "  🔌 Secondary API:        http://localhost:5001"
+    echo "  🌐 Load Balancer:        http://localhost"
+    echo ""
+    echo -e "${BLUE}📖 For detailed monitoring guide, see: docs/user/monitoring-access.md${NC}"
+    echo -e "${BLUE}📋 Quick reference: MONITORING-QUICK-REF.md${NC}"
     echo ""
 }
 
