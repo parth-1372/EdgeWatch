@@ -4,6 +4,10 @@ import logging
 from threading import Lock
 
 logger = logging.getLogger("edgewatch.config")
+ 
+class ConfigurationError(Exception):
+    """Base exception for configuration errors"""
+    pass
 
 class ConfigManager:
     """

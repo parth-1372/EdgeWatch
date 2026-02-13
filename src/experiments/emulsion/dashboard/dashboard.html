@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EdgeWatch | Emulsion Analytics</title>
+    <!-- Modern Typography -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&family=JetBrains+Mono&display=swap"
+        rel="stylesheet">
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --bg-deep: #0f172a;
+            --bg-card: #1e293b;
+            --accent: #38bdf8;
+            --accent-glow: rgba(56, 189, 248, 0.3);
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --glass: rgba(30, 41, 59, 0.7);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Outfit', sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-deep);
+            color: var(--text-primary);
+            min-height: 100vh;
+            overflow-x: hidden;
+            background-image:
+                radial-gradient(circle at 10% 20%, rgba(56, 189, 248, 0.05) 0%, transparent 40%),
+                radial-gradient(circle at 90% 80%, rgba(56, 189, 248, 0.05) 0%, transparent 40%);
+        }
+
+        /* Sidebar and Layout */
+        .dashboard-container {
+            display: grid;
+            grid-template-columns: 320px 1fr;
+            min-height: 100vh;
+        }
+
+        aside {
+            background: var(--bg-card);
+            border-right: 1px solid rgba(255, 255, 255, 0.05);
+            padding: 2rem;
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+            backdrop-filter: blur(10px);
+        }
+
+        .logo {
+            font-size: 1.5rem;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            color: var(--accent);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .logo span {
+            color: white;
+            opacity: 0.8;
+        }
+
+        /* Result Selection */
+        .results-section h3 {
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 1rem;
+        }
+
+        #results-list {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            overflow-y: auto;
+            max-height: 60vh;
+        }
+
+        .result-item {
+            padding: 0.75rem 1rem;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 0.5rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border: 1px solid transparent;
+        }
+
+        .result-item:hover {
+            background: rgba(255, 255, 255, 0.06);
+            border-color: rgba(56, 189, 248, 0.2);
+        }
+
+        .result-item.active {
+            background: var(--accent-glow);
+            border-color: var(--accent);
+            box-shadow: 0 0 20px var(--accent-glow);
+        }
+
+        .result-name {
+            font-size: 0.875rem;
+            display: block;
+            margin-bottom: 0.25rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .result-date {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+
+        /* Main Content */
+        main {
+            padding: 2.5rem;
+            overflow-y: auto;
+        }
+
+        .header-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2.5rem;
+        }
+
+        .title-group h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            background: linear-gradient(to right, #fff, var(--accent));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .title-group p {
+            color: var(--text-secondary);
+            font-size: 1rem;
+        }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 1.5rem;
+            margin-bottom: 2.5rem;
+        }
+
+        .stat-card {
+            background: var(--bg-card);
+            padding: 1.5rem;
+            border-radius: 1rem;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            transition: transform 0.3s ease;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-5px);
+            border-color: var(--accent-glow);
+        }
+
+        .stat-label {
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .stat-value {
+            font-size: 1.75rem;
+            font-weight: 700;
+            color: white;
+        }
+
+        .stat-trend {
+            font-size: 0.75rem;
+            margin-top: 0.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.25rem;
+        }
+
+        .trend-up {
+            color: var(--success);
+        }
+
+        .trend-down {
+            color: var(--danger);
+        }
+
+        /* Chart Section */
+        .charts-container {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 1.5rem;
+            margin-bottom: 2.5rem;
+        }
+
+        .chart-wrapper {
+            background: var(--bg-card);
+            padding: 2rem;
+            border-radius: 1.5rem;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            min-height: 400px;
+        }
+
+        .chart-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+        }
+
+        .chart-header h3 {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+
+        /* Node Details */
+        .node-details {
+            background: var(--bg-card);
+            border-radius: 1.5rem;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            overflow: hidden;
+        }
+
+        .details-header {
+            padding: 2rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .table-container {
+            padding: 0 1rem 1rem;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th {
+            text-align: left;
+            padding: 1rem;
+            color: var(--text-secondary);
+            font-weight: 600;
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        td {
+            padding: 1rem;
+            border-top: 1px solid rgba(255, 255, 255, 0.03);
+            font-size: 0.9rem;
+        }
+
+        .status-pill {
+            padding: 0.25rem 0.75rem;
+            border-radius: 2rem;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .pill-success {
+            background: rgba(16, 185, 129, 0.1);
+            color: var(--success);
+        }
+
+        .pill-warning {
+            background: rgba(245, 158, 11, 0.1);
+            color: var(--warning);
+        }
+
+        /* Animation */
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .animate-fade {
+            animation: fadeIn 0.5s ease forwards;
+        }
+
+        #empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 60vh;
+            color: var(--text-secondary);
+            gap: 1rem;
+        }
+
+        .pulse-accent {
+            width: 20px;
+            height: 20px;
+            background: var(--accent);
+            border-radius: 50%;
+            box-shadow: 0 0 0 var(--accent-glow);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% {
+                box-shadow: 0 0 0 0 var(--accent-glow);
+            }
+
+            70% {
+                box-shadow: 0 0 0 20px rgba(56, 189, 248, 0);
+            }
+
+            100% {
+                box-shadow: 0 0 0 0 rgba(56, 189, 248, 0);
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="dashboard-container">
+        <aside>
+            <div class="logo">
+                <div class="pulse-accent"></div>
+                EdgeWatch <span>Emulsion</span>
+            </div>
+
+            <div class="results-section">
+                <h3>Experiment Runs</h3>
+                <ul id="results-list">
+                    <!-- Result items will be injected here -->
+                </ul>
+            </div>
+
+            <div style="margin-top: auto;">
+                <p style="font-size: 0.75rem; color: var(--text-secondary);">
+                    RESEARCH PROTOTYPE v1.0<br>
+                    VoI Experimentation Suite
+                </p>
+            </div>
+        </aside>
+
+        <main>
+            <div id="content-area" style="display: none;">
+                <div class="header-content animate-fade">
+                    <div class="title-group">
+                        <h1 id="experiment-title">Analytics Overview</h1>
+                        <p id="experiment-timestamp">Analyzing results from the latest run</p>
+                    </div>
+                </div>
+
+                <div class="stats-grid animate-fade" style="animation-delay: 0.1s;">
+                    <div class="stat-card">
+                        <div class="stat-label">Bandwidth Saved</div>
+                        <div class="stat-value" id="stat-bandwidth-saved">0%</div>
+                        <div class="stat-trend trend-up">↑ Highly Efficient</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Total Metrics</div>
+                        <div class="stat-value" id="stat-total-metrics">0</div>
+                        <div class="stat-trend">Collected across all nodes</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Transmission Rate</div>
+                        <div class="stat-value" id="stat-sent-rate">0%</div>
+                        <div class="stat-trend" id="stat-total-sent">0 metrics sent</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Node Count</div>
+                        <div class="stat-value" id="stat-nodes">0</div>
+                        <div class="stat-trend" id="stat-rounds">0 rounds completed</div>
+                    </div>
+                </div>
+
+                <div class="charts-container animate-fade" style="animation-delay: 0.2s;">
+                    <div class="chart-wrapper">
+                        <div class="chart-header">
+                            <h3>Efficiency Over Time</h3>
+                        </div>
+                        <canvas id="efficiencyChart"></canvas>
+                    </div>
+                    <div class="chart-wrapper">
+                        <div class="chart-header">
+                            <h3>Transmission Composition</h3>
+                        </div>
+                        <canvas id="compositionChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="node-details animate-fade" style="animation-delay: 0.3s;">
+                    <div class="details-header">
+                        <h3>Node-by-Node Performance</h3>
+                    </div>
+                    <div class="table-container">
+                        <table id="node-table">
+                            <thead>
+                                border-radius: 20px;
+                                <tr>
+                                    <th>Node ID</th>
+                                    <th>Metrics Collected</th>
+                                    <th>Metrics Sent</th>
+                                    <th>Filtered</th>
+                                    <th>Savings</th>
+                                    <th>Efficiency</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <!-- Node rows will be injected here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div id="empty-state">
+                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                    <line x1="8" y1="21" x2="16" y2="21"></line>
+                    <line x1="12" y1="17" x2="12" y2="21"></line>
+                </svg>
+                <h3>Select a run to begin analysis</h3>
+                <p>Available experiment results are listed on the left.</p>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        let efficiencyChart = null;
+        let compositionChart = null;
+
+        // Fetch available results
+        async function fetchResults() {
+            const response = await fetch('/api/results');
+            const data = await response.json();
+            const list = document.getElementById('results-list');
+            list.innerHTML = '';
+
+            data.forEach((file, index) => {
+                const li = document.createElement('li');
+                li.className = 'result-item';
+                if (index === 0) {
+                    // loadLatest(file.filename);
+                }
+
+                const date = new Date(file.timestamp * 1000).toLocaleString();
+                li.innerHTML = `
+                    <span class="result-name">${file.filename}</span>
+                    <span class="result-date">${date}</span>
+                `;
+                li.onclick = () => loadResult(file.filename, li);
+                list.appendChild(li);
+            });
+        }
+
+        async function loadResult(filename, element) {
+            // UI Updates
+            document.querySelectorAll('.result-item').forEach(el => el.classList.remove('active'));
+            if (element) element.classList.add('active');
+
+            document.getElementById('empty-state').style.display = 'none';
+            document.getElementById('content-area').style.display = 'block';
+
+            const response = await fetch(`/api/results/${filename}`);
+            const data = await response.json();
+
+            updateStats(data);
+            renderEfficiencyChart(data);
+            renderCompositionChart(data);
+            updateNodeTable(data);
+        }
+
+        function updateStats(data) {
+            const stats = data.experiment_stats;
+            document.getElementById('stat-bandwidth-saved').textContent = stats.average_bandwidth_saved.toFixed(1) + '%';
+            document.getElementById('stat-total-metrics').textContent = stats.total_metrics_collected.toLocaleString();
+
+            const sentRate = (stats.total_metrics_sent / stats.total_metrics_collected) * 100;
+            document.getElementById('stat-sent-rate').textContent = sentRate.toFixed(1) + '%';
+            document.getElementById('stat-total-sent').textContent = stats.total_metrics_sent.toLocaleString() + ' metrics sent';
+
+            document.getElementById('stat-nodes').textContent = data.experiment_config.num_nodes;
+            document.getElementById('stat-rounds').textContent = stats.total_rounds + ' rounds completed';
+
+            document.getElementById('experiment-title').textContent = data.experiment_config.voi_enabled ? 'VoI Optimized Monitoring' : 'Baseline Monitoring';
+            document.getElementById('experiment-timestamp').textContent = 'Experiment Status: ' + (data.experiment_config.voi_enabled ? 'Optimized' : 'Raw');
+        }
+
+        function renderEfficiencyChart(data) {
+            const ctx = document.getElementById('efficiencyChart').getContext('2d');
+            const history = data.experiment_stats.round_history || [];
+
+            const labels = history.map(h => `R${h.round}`);
+            const efficiencyData = history.map(h => h.savings_percent);
+
+            if (efficiencyChart) efficiencyChart.destroy();
+
+            efficiencyChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Reduction in Traffic %',
+                        data: efficiencyData,
+                        borderColor: '#38bdf8',
+                        backgroundColor: 'rgba(56, 189, 248, 0.1)',
+                        fill: true,
+                        tension: 0.4,
+                        borderWidth: 3,
+                        pointRadius: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: (context) => `Savings: ${context.parsed.y.toFixed(1)}%`
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            max: 100,
+                            grid: { color: 'rgba(255,255,255,0.05)' },
+                            ticks: { color: '#94a3b8' }
+                        },
+                        x: {
+                            grid: { display: false },
+                            ticks: {
+                                color: '#94a3b8',
+                                maxTicksLimit: 20
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function renderCompositionChart(data) {
+            const ctx = document.getElementById('compositionChart').getContext('2d');
+            const stats = data.experiment_stats;
+            const filtered = stats.total_metrics_filtered || 0;
+            const sent = stats.total_metrics_sent || 0;
+            const remaining = Math.max(0, stats.total_metrics_collected - sent - filtered);
+
+            if (compositionChart) compositionChart.destroy();
+
+            compositionChart = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Sent', 'Filtered (VoI)', 'Overhead'],
+                    datasets: [{
+                        data: [sent, filtered, remaining],
+                        backgroundColor: ['#38bdf8', '#10b981', '#1e293b'],
+                        borderWidth: 0,
+                        hoverOffset: 10
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    cutout: '70%',
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: {
+                                color: '#94a3b8',
+                                padding: 20,
+                                font: { family: 'Outfit', size: 12 }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateNodeTable(data) {
+            const tbody = document.querySelector('#node-table tbody');
+            tbody.innerHTML = '';
+
+            const nodes = data.node_results || [];
+            nodes.forEach(node => {
+                const tr = document.createElement('tr');
+                const stats = node.statistics;
+                const efficiency = (100 - (stats.metrics_sent / stats.metrics_collected * 100));
+
+                tr.innerHTML = `
+                    <td style="font-family:'JetBrains Mono', monospace; color: var(--accent); font-weight: 600;">${node.node_id}</td>
+                    <td>${stats.metrics_collected}</td>
+                    <td>${stats.metrics_sent}</td>
+                    <td style="color: var(--success);">${stats.metrics_filtered}</td>
+                    <td>${stats.bandwidth_saved.toFixed(1)}%</td>
+                    <td>
+                        <span class="status-pill ${efficiency > 50 ? 'pill-success' : 'pill-warning'}">
+                            ${efficiency.toFixed(1)}% Eff
+                        </span>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        // Init
+        fetchResults();
+    </script>
+</body>
+
+</html>

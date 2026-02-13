@@ -658,6 +658,10 @@ class EdgeWatchDatabase:
             logger.error(f"Error closing database: {e}")
 
 
+# Alias for compatibility
+DatabaseManager = EdgeWatchDatabase
+
+
 # Global database instance
 _database_instance = None
 _database_lock = threading.Lock()

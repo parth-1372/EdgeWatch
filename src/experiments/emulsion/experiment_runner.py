@@ -60,6 +60,7 @@ class ExperimentRunner:
             "total_metrics_collected": 0,
             "total_metrics_sent": 0,
             "average_bandwidth_saved": 0.0,
+            "round_history": [],  # Track stats per round for charting
         }
         
         logger.info(
@@ -93,6 +94,28 @@ class ExperimentRunner:
         # Advance all nodes to next cycle
         for node in self.nodes:
             node.advance_cycle()
+            
+        # Record stats for this round
+        total_round_sent = sum(n.stats["metrics_sent"] for n in self.nodes)
+        total_round_collected = sum(n.stats["metrics_collected"] for n in self.nodes)
+        
+        # Calculate deltas for this round specifically
+        if len(self.experiment_stats["round_history"]) > 0:
+            last_round = self.experiment_stats["round_history"][-1]
+            round_sent = total_round_sent - last_round["cumulative_sent"]
+            round_collected = total_round_collected - last_round["cumulative_collected"]
+        else:
+            round_sent = total_round_sent
+            round_collected = total_round_collected
+            
+        self.experiment_stats["round_history"].append({
+            "round": round_num,
+            "sent": round_sent,
+            "collected": round_collected,
+            "cumulative_sent": total_round_sent,
+            "cumulative_collected": total_round_collected,
+            "savings_percent": ((round_collected - round_sent) / round_collected * 100) if round_collected > 0 else 0
+        })
         
         # Log round stats
         if round_num % 10 == 0:
@@ -317,7 +340,12 @@ def main():
             gossip_rate=args.gossip_rate
         )
         
-        runner.run_experiment()
+        try:
+            runner.run_experiment()
+        except KeyboardInterrupt:
+            # Let the runner finish its internal cleanup
+            pass
+            
         runner.print_summary()
         
         # Save results

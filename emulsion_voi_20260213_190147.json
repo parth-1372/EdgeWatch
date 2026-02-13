@@ -1,0 +1,244 @@
+{
+  "experiment_config": {
+    "num_nodes": 10,
+    "max_rounds": 100,
+    "voi_enabled": true,
+    "gossip_rate": 2.0
+  },
+  "experiment_stats": {
+    "start_time": "2026-02-13T18:56:21.297694",
+    "end_time": "2026-02-13T19:01:47.354949",
+    "total_rounds": 100,
+    "total_metrics_collected": 10000,
+    "total_metrics_sent": 3703,
+    "average_bandwidth_saved": 32.97,
+    "total_metrics_filtered": 3297
+  },
+  "node_results": [
+    {
+      "node_id": "node-000",
+      "statistics": {
+        "total_rounds": 100,
+        "metrics_collected": 1000,
+        "metrics_sent": 370,
+        "metrics_filtered": 330,
+        "bandwidth_saved": 57.14285714285714,
+        "gossip_messages_sent": 0,
+        "gossip_messages_received": 300,
+        "voi_stats": {
+          "total_metrics_evaluated": 700,
+          "metrics_sent": 370,
+          "metrics_filtered": 330,
+          "bandwidth_saved_percent": 47.14285714285714
+        }
+      }
+    },
+    {
+      "node_id": "node-001",
+      "statistics": {
+        "total_rounds": 100,
+        "metrics_collected": 1000,
+        "metrics_sent": 370,
+        "metrics_filtered": 330,
+        "bandwidth_saved": 57.14285714285714,
+        "gossip_messages_sent": 0,
+        "gossip_messages_received": 300,
+        "voi_stats": {
+          "total_metrics_evaluated": 700,
+          "metrics_sent": 370,
+          "metrics_filtered": 330,
+          "bandwidth_saved_percent": 47.14285714285714
+        }
+      }
+    },
+    {
+      "node_id": "node-002",
+      "statistics": {
+        "total_rounds": 100,
+        "metrics_collected": 1000,
+        "metrics_sent": 370,
+        "metrics_filtered": 330,
+        "bandwidth_saved": 57.14285714285714,
+        "gossip_messages_sent": 0,
+        "gossip_messages_received": 300,
+        "voi_stats": {
+          "total_metrics_evaluated": 700,
+          "metrics_sent": 370,
+          "metrics_filtered": 330,
+          "bandwidth_saved_percent": 47.14285714285714
+        }
+      }
+    },
+    {
+      "node_id": "node-003",
+      "statistics": {
+        "total_rounds": 100,
+        "metrics_collected": 1000,
+        "metrics_sent": 370,
+        "metrics_filtered": 330,
+        "bandwidth_saved": 57.14285714285714,
+        "gossip_messages_sent": 0,
+        "gossip_messages_received": 300,
+        "voi_stats": {
+          "total_metrics_evaluated": 700,
+          "metrics_sent": 370,
+          "metrics_filtered": 330,
+          "bandwidth_saved_percent": 47.14285714285714
+        }
+      }
+    },
+    {
+      "node_id": "node-004",
+      "statistics": {
+        "total_rounds": 100,
+        "metrics_collected": 1000,
+        "metrics_sent": 371,
+        "metrics_filtered": 329,
+        "bandwidth_saved": 57.14285714285714,
+        "gossip_messages_sent": 0,
+        "gossip_messages_received": 300,
+        "voi_stats": {
+          "total_metrics_evaluated": 700,
+          "metrics_sent": 371,
+          "metrics_filtered": 329,
+          "bandwidth_saved_percent": 47.0
+        }
+      }
+    },
+    {
+      "node_id": "node-005",
+      "statistics": {
+        "total_rounds": 100,
+        "metrics_collected": 1000,
+        "metrics_sent": 371,
+        "metrics_filtered": 329,
+        "bandwidth_saved": 57.14285714285714,
+        "gossip_messages_sent": 0,
+        "gossip_messages_received": 300,
+        "voi_stats": {
+          "total_metrics_evaluated": 700,
+          "metrics_sent": 371,
+          "metrics_filtered": 329,
+          "bandwidth_saved_percent": 47.0
+        }
+      }
+    },
+    {
+      "node_id": "node-006",
+      "statistics": {
+        "total_rounds": 100,
+        "metrics_collected": 1000,
+        "metrics_sent": 370,
+        "metrics_filtered": 330,
+        "bandwidth_saved": 57.14285714285714,
+        "gossip_messages_sent": 0,
+        "gossip_messages_received": 300,
+        "voi_stats": {
+          "total_metrics_evaluated": 700,
+          "metrics_sent": 370,
+          "metrics_filtered": 330,
+          "bandwidth_saved_percent": 47.14285714285714
+        }
+      }
+    },
+    {
+      "node_id": "node-007",
+      "statistics": {
+        "total_rounds": 100,
+        "metrics_collected": 1000,
+        "metrics_sent": 370,
+        "metrics_filtered": 330,
+        "bandwidth_saved": 57.14285714285714,
+        "gossip_messages_sent": 0,
+        "gossip_messages_received": 300,
+        "voi_stats": {
+          "total_metrics_evaluated": 700,
+          "metrics_sent": 370,
+          "metrics_filtered": 330,
+          "bandwidth_saved_percent": 47.14285714285714
+        }
+      }
+    },
+    {
+      "node_id": "node-008",
+      "statistics": {
+        "total_rounds": 100,
+        "metrics_collected": 1000,
+        "metrics_sent": 370,
+        "metrics_filtered": 330,
+        "bandwidth_saved": 57.14285714285714,
+        "gossip_messages_sent": 0,
+        "gossip_messages_received": 300,
+        "voi_stats": {
+          "total_metrics_evaluated": 700,
+          "metrics_sent": 370,
+          "metrics_filtered": 330,
+          "bandwidth_saved_percent": 47.14285714285714
+        }
+      }
+    },
+    {
+      "node_id": "node-009",
+      "statistics": {
+        "total_rounds": 100,
+        "metrics_collected": 1000,
+        "metrics_sent": 371,
+        "metrics_filtered": 329,
+        "bandwidth_saved": 57.14285714285714,
+        "gossip_messages_sent": 0,
+        "gossip_messages_received": 300,
+        "voi_stats": {
+          "total_metrics_evaluated": 700,
+          "metrics_sent": 371,
+          "metrics_filtered": 329,
+          "bandwidth_saved_percent": 47.0
+        }
+      }
+    }
+  ],
+  "voi_config": {
+    "gossip_rate": 2.0,
+    "target_nodes": 3,
+    "max_rounds": 100,
+    "collect_interval": 1,
+    "push_interval": 10,
+    "voi_enabled": true,
+    "compression_enabled": false,
+    "metric_priorities": {
+      "cpu_percent": "HIGH",
+      "memory_percent": "MEDIUM",
+      "disk_usage": "LOW",
+      "network_io": "MEDIUM",
+      "network_bytes_sent": "MEDIUM",
+      "network_bytes_recv": "MEDIUM",
+      "container_count": "LOW",
+      "container_cpu": "HIGH",
+      "container_memory": "MEDIUM",
+      "request_rate": "HIGH",
+      "error_rate": "HIGH",
+      "response_time": "MEDIUM",
+      "active_connections": "MEDIUM",
+      "edge_latency": "HIGH",
+      "cache_hit_rate": "MEDIUM",
+      "queue_length": "HIGH"
+    },
+    "metric_deltas": {
+      "cpu_percent": 5.0,
+      "memory_percent": 7.0,
+      "disk_usage": 10.0,
+      "network_io": 15.0,
+      "network_bytes_sent": 20.0,
+      "network_bytes_recv": 20.0,
+      "container_count": 1,
+      "container_cpu": 5.0,
+      "container_memory": 7.0,
+      "request_rate": 10.0,
+      "error_rate": 0.5,
+      "response_time": 15.0,
+      "active_connections": 10.0,
+      "edge_latency": 10.0,
+      "cache_hit_rate": 5.0,
+      "queue_length": 1
+    }
+  }
+}

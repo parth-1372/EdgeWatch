@@ -1,0 +1,154 @@
+{
+  "experiment_config": {
+    "num_nodes": 5,
+    "max_rounds": 2,
+    "voi_enabled": true,
+    "gossip_rate": 2.0
+  },
+  "experiment_stats": {
+    "start_time": "2026-02-13T18:55:00.033635",
+    "end_time": "2026-02-13T18:55:05.486414",
+    "total_rounds": 2,
+    "total_metrics_collected": 100,
+    "total_metrics_sent": 50,
+    "average_bandwidth_saved": 20.0,
+    "total_metrics_filtered": 20
+  },
+  "node_results": [
+    {
+      "node_id": "node-000",
+      "statistics": {
+        "total_rounds": 2,
+        "metrics_collected": 20,
+        "metrics_sent": 10,
+        "metrics_filtered": 4,
+        "bandwidth_saved": 57.14285714285714,
+        "gossip_messages_sent": 0,
+        "gossip_messages_received": 6,
+        "voi_stats": {
+          "total_metrics_evaluated": 14,
+          "metrics_sent": 10,
+          "metrics_filtered": 4,
+          "bandwidth_saved_percent": 28.57142857142857
+        }
+      }
+    },
+    {
+      "node_id": "node-001",
+      "statistics": {
+        "total_rounds": 2,
+        "metrics_collected": 20,
+        "metrics_sent": 10,
+        "metrics_filtered": 4,
+        "bandwidth_saved": 57.14285714285714,
+        "gossip_messages_sent": 0,
+        "gossip_messages_received": 6,
+        "voi_stats": {
+          "total_metrics_evaluated": 14,
+          "metrics_sent": 10,
+          "metrics_filtered": 4,
+          "bandwidth_saved_percent": 28.57142857142857
+        }
+      }
+    },
+    {
+      "node_id": "node-002",
+      "statistics": {
+        "total_rounds": 2,
+        "metrics_collected": 20,
+        "metrics_sent": 10,
+        "metrics_filtered": 4,
+        "bandwidth_saved": 57.14285714285714,
+        "gossip_messages_sent": 0,
+        "gossip_messages_received": 6,
+        "voi_stats": {
+          "total_metrics_evaluated": 14,
+          "metrics_sent": 10,
+          "metrics_filtered": 4,
+          "bandwidth_saved_percent": 28.57142857142857
+        }
+      }
+    },
+    {
+      "node_id": "node-003",
+      "statistics": {
+        "total_rounds": 2,
+        "metrics_collected": 20,
+        "metrics_sent": 10,
+        "metrics_filtered": 4,
+        "bandwidth_saved": 57.14285714285714,
+        "gossip_messages_sent": 0,
+        "gossip_messages_received": 6,
+        "voi_stats": {
+          "total_metrics_evaluated": 14,
+          "metrics_sent": 10,
+          "metrics_filtered": 4,
+          "bandwidth_saved_percent": 28.57142857142857
+        }
+      }
+    },
+    {
+      "node_id": "node-004",
+      "statistics": {
+        "total_rounds": 2,
+        "metrics_collected": 20,
+        "metrics_sent": 10,
+        "metrics_filtered": 4,
+        "bandwidth_saved": 57.14285714285714,
+        "gossip_messages_sent": 0,
+        "gossip_messages_received": 6,
+        "voi_stats": {
+          "total_metrics_evaluated": 14,
+          "metrics_sent": 10,
+          "metrics_filtered": 4,
+          "bandwidth_saved_percent": 28.57142857142857
+        }
+      }
+    }
+  ],
+  "voi_config": {
+    "gossip_rate": 2.0,
+    "target_nodes": 3,
+    "max_rounds": 100,
+    "collect_interval": 1,
+    "push_interval": 10,
+    "voi_enabled": true,
+    "compression_enabled": false,
+    "metric_priorities": {
+      "cpu_percent": "HIGH",
+      "memory_percent": "MEDIUM",
+      "disk_usage": "LOW",
+      "network_io": "MEDIUM",
+      "network_bytes_sent": "MEDIUM",
+      "network_bytes_recv": "MEDIUM",
+      "container_count": "LOW",
+      "container_cpu": "HIGH",
+      "container_memory": "MEDIUM",
+      "request_rate": "HIGH",
+      "error_rate": "HIGH",
+      "response_time": "MEDIUM",
+      "active_connections": "MEDIUM",
+      "edge_latency": "HIGH",
+      "cache_hit_rate": "MEDIUM",
+      "queue_length": "HIGH"
+    },
+    "metric_deltas": {
+      "cpu_percent": 5.0,
+      "memory_percent": 7.0,
+      "disk_usage": 10.0,
+      "network_io": 15.0,
+      "network_bytes_sent": 20.0,
+      "network_bytes_recv": 20.0,
+      "container_count": 1,
+      "container_cpu": 5.0,
+      "container_memory": 7.0,
+      "request_rate": 10.0,
+      "error_rate": 0.5,
+      "response_time": 15.0,
+      "active_connections": 10.0,
+      "edge_latency": 10.0,
+      "cache_hit_rate": 5.0,
+      "queue_length": 1
+    }
+  }
+}
