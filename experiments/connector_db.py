@@ -1,18 +1,25 @@
+import os
 import sqlite3
 import configparser
 
 
 parser = configparser.ConfigParser()
-parser.read('demonMonitoring.ini')
+parser.read(os.path.join(os.path.dirname(__file__), 'config.ini'))
 
 
 def get_connection():
-    return sqlite3.connect('demonDB.db', check_same_thread=False)
+    conn = sqlite3.connect(
+        os.path.join(os.path.dirname(__file__), parser.get('database', 'db_file')), 
+        check_same_thread=False
+    )
+    conn.execute("PRAGMA journal_mode = WAL;")
+    conn.execute("PRAGMA synchronous = NORMAL;")
+    return conn
 
 
 
 
-def insert_into_round_of_node(run_id, ip, port, this_round, nd, fd, rm, ic, bytes_of_data, connection):
+def insert_into_round_of_node(run_id, ip, port, this_round, nd, fd, rm, ic, bytes_of_data):
     try:
         connection = get_connection()
         cursor = connection.cursor()
@@ -46,7 +53,7 @@ def insert_into_round_of_node(run_id, ip, port, this_round, nd, fd, rm, ic, byte
         return False
 
 
-def insert_into_round_of_node_max_round(run_id, ip, port, this_round, nd, fd, rm, ic, bytes_of_data, connection):
+def insert_into_round_of_node_max_round(run_id, ip, port, this_round, nd, fd, rm, ic, bytes_of_data):
     try:
         connection = get_connection()
         cursor = connection.cursor()
@@ -80,8 +87,17 @@ def insert_into_round_of_node_max_round(run_id, ip, port, this_round, nd, fd, rm
         return False
 
 class NodeDB:
+    def _connect(self):
+        conn = sqlite3.connect(
+            os.path.join(os.path.dirname(__file__), parser.get('database', 'db_file')), 
+            check_same_thread=False
+        )
+        conn.execute("PRAGMA journal_mode = WAL;")
+        conn.execute("PRAGMA synchronous = NORMAL;")
+        return conn
+
     def __init__(self):
-        self.connection = sqlite3.connect('NodeStorage.db', check_same_thread=False)
+        self.connection = self._connect()
         self.cursor = self.connection.cursor()
         self.cursor.execute('''
             CREATE TABLE IF NOT EXISTS unique_entries (
@@ -107,9 +123,9 @@ class NodeDB:
         return sqlite3.connect('NodeStorage.db', check_same_thread=False)
 
 
-class DemonDB:
+class PrioMonDB:
     def __init__(self):
-        self.connection = sqlite3.connect('demonDB.db', check_same_thread=False)
+        self.connection = get_connection()
         self.cursor = self.connection.cursor()
         self.cursor.execute(
             "CREATE TABLE IF NOT EXISTS experiment ("
@@ -163,38 +179,34 @@ class DemonDB:
             "total_messages_for_query INTEGER, "
             "success TEXT)"
         )
-        self.cursor.execute('''
-        CREATE TABLE IF NOT EXISTS round_metrics_stats (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            run_id INTEGER,
-            node_ip TEXT,
-            node_port TEXT,
-            round INTEGER,
-            metrics_sent INTEGER,
-            metrics_filtered INTEGER,
-            timestamp REAL
-        )
-        ''')
-        
-        self.cursor.execute('''
-        CREATE TABLE IF NOT EXISTS metric_transmissions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            run_id INTEGER,
-            node_ip TEXT,
-            node_port TEXT,
-            round INTEGER,
-            metric_type TEXT,
-            was_sent INTEGER,
-            metric_value REAL,
-            timestamp REAL
-        )
-        ''')
+        # tables for priority-based metric tracking (monitoring.py queues inserts here)
+        self.cursor.execute(
+            "CREATE TABLE IF NOT EXISTS round_metrics_stats ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "run_id BIGINT references run(id), "
+            "node_ip TEXT, "
+            "node_port TEXT, "
+            "round INTEGER, "
+            "metrics_sent INTEGER, "
+            "metrics_filtered INTEGER, "
+            "timestamp REAL)")
+        self.cursor.execute(
+            "CREATE TABLE IF NOT EXISTS metric_transmissions ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "run_id BIGINT references run(id), "
+            "node_ip TEXT, "
+            "node_port TEXT, "
+            "round INTEGER, "
+            "metric_type TEXT, "
+            "was_sent INTEGER, "
+            "metric_value REAL, "
+            "timestamp REAL)")
         self.connection.commit()
         self.connection.close()
 
     def insert_into_experiment(self, timestamp):
         try:
-            self.connection = sqlite3.connect('demonDB.db', check_same_thread=False)
+            self.connection = get_connection()
             self.cursor = self.connection.cursor()
             self.cursor.execute("INSERT INTO experiment (timestamp) VALUES (?)", (timestamp,))
             to_return = self.cursor.lastrowid
@@ -207,7 +219,7 @@ class DemonDB:
 
     def insert_into_run(self, experiment_id, run_count, node_count, gossip_rate, target_count):
         try:
-            self.connection = sqlite3.connect('demonDB.db', check_same_thread=False)
+            self.connection = get_connection()
             self.cursor = self.connection.cursor()
             self.cursor.execute("INSERT INTO run ("
                                 "experiment_id,"
@@ -261,7 +273,7 @@ class DemonDB:
 
     def insert_into_converged_run(self, run_id, convergence_round, convergence_message_count, convergence_time):
         try:
-            self.connection = sqlite3.connect('demonDB.db', check_same_thread=False)
+            self.connection = get_connection()
             self.cursor = self.connection.cursor()
             self.cursor.execute("UPDATE run SET "
                                 "convergence_round = ?, "

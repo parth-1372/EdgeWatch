@@ -1,6 +1,6 @@
 import sys
 import os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 import concurrent.futures
 import configparser
 import json
@@ -16,13 +16,14 @@ import threading
 from flask import Flask, request
 from joblib import Parallel, delayed
 import connector_db as dbConnector
-import logging
 from sqlite3 import Connection
 from src import query_client
 
-monitoring_demon = Flask(__name__)
+session = requests.Session()
+
+monitoring_priomon = Flask(__name__)
 parser = configparser.ConfigParser()
-parser.read('../config.ini')
+parser.read(os.path.join(os.path.dirname(__file__), 'config.ini'))
 try:
     docker_client = docker.client.from_env()
 except Exception as e:
@@ -30,9 +31,89 @@ except Exception as e:
     print("trace: {}".format(traceback.format_exc()))
     exit(1)
 experiment = None
-# log = logging.getLogger('werkzeug')
-# log.setLevel(logging.ERROR)
+# protects concurrent reads/writes to run state from Flask threads
+run_lock = threading.Lock()
 
+def execute_queries_from_queue():
+    # keep the connection open for the lifetime of the thread for speed
+    conn = sqlite3.connect('priomonDB.db', check_same_thread=False)
+    cursor = conn.cursor()
+    
+    # how many queries to bundle before one disk sync
+    batch_size = 50
+    pending_items = []
+    
+    while True:
+        query_data = None
+        try:
+            query_data = experiment.query_queue.get()
+            if query_data is None:
+                # final flush before exiting
+                if pending_items:
+                    conn.commit()
+                    for _ in pending_items:
+                        experiment.query_queue.task_done()
+                break
+
+            query, parameters = query_data
+            cursor.execute(query, parameters)
+            pending_items.append(query_data)
+            
+            # commit if batch is full or if the queue is temporarily empty 
+            if len(pending_items) >= batch_size or experiment.query_queue.empty():
+                conn.commit()
+                for _ in pending_items:
+                    experiment.query_queue.task_done()
+                pending_items = []
+
+        except Exception as e:
+            # if anything fails, we gotta rollback to prevent a stuck transaction
+            print("Error db batch: {}".format(e))
+            print("trace: {}".format(traceback.format_exc()))
+            try:
+                conn.rollback()
+            except:
+                pass
+            
+            # cleanup: mark everything in the failed batch as done so the queue doesn't hang
+            for _ in pending_items:
+                experiment.query_queue.task_done()
+            pending_items = []
+            
+            # if the current item is also problematic, mark it too
+            if query_data is not None:
+                experiment.query_queue.task_done()
+            
+            continue
+
+def get_target_count(node_count, target_count_range):
+    new_range = []
+    for i in target_count_range:
+        if i <= node_count:
+            new_range.append(i)
+    return new_range
+
+def get_free_port():
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.bind(('', 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+def make_save_able_dic_from_run(run):
+    save_able_dic = {"node_count": run.node_count, "target_count": run.target_count, "gossip_rate": run.gossip_rate,
+                     "start_time": run.start_time, "convergence_time": run.convergence_time,
+                     "convergence_message_count": run.convergence_message_count,
+                     "convergence_round": run.convergence_round}
+    return save_able_dic
+
+def save_run_to_database(run):
+    run.db_id = experiment.db.insert_into_run(experiment.db_id, run.run, run.node_count, run.gossip_rate,
+                                              run.target_count)
+
+def save_converged_run_to_database(run):
+    experiment.db.insert_into_converged_run(run.db_id, run.convergence_round, run.convergence_message_count,
+                                            run.convergence_time)
 
 class Run:
     def __init__(self, node_count, gossip_rate, target_count, run, node_list=None, db_collection=None):
@@ -57,7 +138,6 @@ class Run:
     def set_db_id(self, param):
         self.db_id = param
 
-
 class Experiment:
     def __init__(self, node_count_range, gossip_rate_range, target_count_range, run_count, monitoring_address_ip,
                  is_send_data_back, push_mode):
@@ -68,7 +148,7 @@ class Experiment:
         self.run_count = run_count
         self.runs = []
         self.monitoring_address_ip = monitoring_address_ip
-        self.db = dbConnector.DemonDB()
+        self.db = dbConnector.PrioMonDB()
         self.query_queue = queue.Queue()
         self.query_thread = None
         self.is_send_data_back = is_send_data_back
@@ -78,57 +158,26 @@ class Experiment:
     def set_db_id(self, param):
         self.db_id = param
 
+MAX_SPAWN_RETRIES = 5
 
-def execute_queries_from_queue():
-    while True:
-        try:
-            conn = sqlite3.connect('demonDB.db', check_same_thread=False)
-            cursor = conn.cursor()
-            query_data = experiment.query_queue.get()
-            if query_data is None:
-                break  # Signal to exit the thread
-            query, parameters = query_data
-            cursor.execute(query, parameters)
-            conn.commit()
-            experiment.query_queue.task_done()
-        except Exception as e:
-            print("Error db: {}".format(e))
-            print("trace: {}".format(traceback.format_exc()))
-            continue
-
-
-def get_target_count(node_count, target_count_range):
-    new_range = []
-    for i in target_count_range:
-        if i <= node_count:
-            new_range.append(i)
-    return new_range
-
-
-def spawn_node(index, node_list, client, custom_network_name):
+def spawn_node(index, node_list, client, custom_network_name, retries=0):
+    if retries >= MAX_SPAWN_RETRIES:
+        print("Failed to spawn node {} after {} retries, giving up".format(index, MAX_SPAWN_RETRIES))
+        return
     try:
-        new_node = docker_client.containers.run("demonv1", auto_remove=True, detach=True,
+        new_node = docker_client.containers.run("priomonv1", auto_remove=True, detach=True,
                                                 network_mode=custom_network_name,
                                                 ports={'5000': node_list[index]["port"]})
     except Exception as e:
         print("Node not spawned: {}".format(e))
         print("trace: {}".format(traceback.format_exc()))
         node_list[index]["port"] = get_free_port()
-        spawn_node(index, node_list, client, custom_network_name)
+        spawn_node(index, node_list, client, custom_network_name, retries + 1)
     else:
         node_details = client.containers.get(new_node.id)
         node_list[index] = {"id": node_details.id,
                             "ip": node_details.attrs['NetworkSettings']['Networks']['test']['IPAddress'],
                             "port": node_details.attrs['NetworkSettings']['Ports']['5000/tcp'][0]['HostPort']}
-
-
-def get_free_port():
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.bind(('', 0))
-    port = s.getsockname()[1]
-    s.close()
-    return port
-
 
 def spawn_multiple_nodes(run):
     network_name = "test"
@@ -148,7 +197,6 @@ def spawn_multiple_nodes(run):
     Parallel(n_jobs=-1, prefer="threads")(
         delayed(spawn_node)(i, run.node_list, client, network_name) for i in range(from_index, run.node_count))
 
-
 def nodes_are_ready(run):
     for i in range(0, run.node_count):
         if docker_client.containers.get(run.node_list[i]['id']).status != "running":
@@ -156,19 +204,46 @@ def nodes_are_ready(run):
         run.node_list[i]["is_alive"] = True
     return True
 
+def restart_node(docker_id):
+    try:
+        docker_client.containers.get(docker_id).restart()
+    except Exception as e:
+        print("An error occurred while restarting the container: {}".format(e))
+
+def reset_node(ip, port, docker_id):
+    try:
+        time.sleep(random.uniform(0.01, 0.05))
+        session.get("http://{}:{}/reset_node".format(ip, port), timeout=30)
+    except Exception as e:
+        print("An error occurred while sending the request: {}".format(e))
+        restart_node(docker_id)
+
+@monitoring_priomon.route('/delete_nodes', methods=['GET'])
+def delete_all_nodes():
+    to_remove = docker_client.containers.list(filters={"ancestor": "priomonv1"})
+    for node in to_remove:
+        node.remove(force=True)
+    return "OK"
+
+# not a route — called internally by the experiment loop, needs a run object
+def restart_all_nodes(run):
+    start = time.time()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=run.node_count) as executor:
+        for i in range(0, run.node_count):
+            executor.submit(restart_node, run.node_list[i]["id"])
+    print("Restart time: {}".format(time.time() - start), flush=True)
 
 def start_node(index, run, database_address, monitoring_address, ip):
     to_send = {"node_list": run.node_list, "target_count": run.target_count, "gossip_rate": run.gossip_rate,
                "database_address": database_address, "monitoring_address": monitoring_address,
                "node_ip": run.node_list[index]["ip"], "is_send_data_back": experiment.is_send_data_back,
-               "push_mode": experiment.push_mode, "client_port": "4000"}
+               "push_mode": experiment.push_mode, "client_port": parser.get('PriomonParam', 'client_port')}
     try:
         time.sleep(0.01)
-        requests.post("http://{}:{}/start_node".format(ip, run.node_list[index]["port"]), json=to_send)
+        session.post("http://{}:{}/start_node".format(ip, run.node_list[index]["port"]), json=to_send)
     except Exception as e:
         print("Node not started: {}".format(e))
         start_node(index, run, database_address, monitoring_address, ip)
-
 
 def start_run(run, monitoring_address):
     database_address = parser.get('database', 'db_file')
@@ -178,6 +253,44 @@ def start_run(run, monitoring_address):
             executor.submit(start_node, i, run, database_address, monitoring_address, ip)
     run.start_time = time.time()
 
+def reset_run_sync(run):
+    ip = parser.get('system_setting', 'docker_ip')
+    print("Resetting nodes", flush=True)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=run.node_count) as executor:
+        for i in range(0, run.node_count):
+            executor.submit(reset_node, ip, run.node_list[i]["port"], run.node_list[i]["id"])
+
+def prepare_run(run):
+    spawn_multiple_nodes(run)
+    while not nodes_are_ready(run):
+        time.sleep(1)
+    save_run_to_database(run)
+    print("Run {} started".format(run.db_id), flush=True)
+    time.sleep(10)
+
+def check_if_all_nodes_are_reset(run):
+    for node in run.node_list:
+        if node["is_alive"]:
+            return False
+    return True
+
+def stop_node_percentage(run, percent):
+    print("stopping percentage of nodes: {}".format(percent))
+    if percent == 0:
+        return
+    nodes_to_stop_count = int(len(run.node_list) * percent)
+    indices = list(range(len(run.node_list)))
+    random_indices_to_stop = random.sample(indices, nodes_to_stop_count)
+    for i in random_indices_to_stop:
+        try:
+            container_to_stop = docker_client.containers.get(run.node_list[i]["id"])
+            container_to_stop.stop()
+            run.node_list[i]["is_alive"] = False
+            run.stopped_nodes[i] = run.node_list[i]
+        except Exception as e:
+            print("An error occurred while stopping container: {}".format(e))
+    print("{}% of nodes (n={}) are stopped".format(percent * 100, nodes_to_stop_count))
+    return
 
 def run_converged(run):
     run.convergence_message_count = run.message_count
@@ -188,7 +301,6 @@ def run_converged(run):
         print("Convergence message count: {}".format(run.convergence_message_count))
 
     run.is_converged = True
-
 
 def check_convergence(run):
     if run.is_converged:
@@ -205,68 +317,10 @@ def check_convergence(run):
                 return False
     run_converged(run)
 
-def check_if_all_nodes_are_reset(run):
-    for node in run.node_list:
-        if node["is_alive"]:
-            return False
-    return True
-
-
-def reset_run_sync(run):
-    ip = parser.get('system_setting', 'docker_ip')
-    print("Resetting nodes", flush=True)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=run.node_count) as executor:
-        for i in range(0, run.node_count):
-            executor.submit(reset_node, ip, run.node_list[i]["port"], run.node_list[i]["id"])
-
-
-@monitoring_demon.route('/restart_all', methods=['GET'])
-def restart_all_nodes(run):
-    start = time.time()
-    with concurrent.futures.ThreadPoolExecutor(max_workers=run.node_count) as executor:
-        for i in range(0, run.node_count):
-            executor.submit(restart_node, run.node_list[i]["id"])
-    print("Restart time: {}".format(time.time() - start), flush=True)
-
-
-def restart_node(docker_id):
-    try:
-        docker_client.containers.get(docker_id).restart()
-    except Exception as e:
-        print("An error occurred while restarting the container: {}".format(e))
-
-
-def reset_node(ip, port, docker_id):
-    try:
-        time.sleep(random.uniform(0.01, 0.05))
-        requests.get("http://{}:{}/reset_node".format(ip, port), timeout=30)
-    except Exception as e:
-        print("An error occurred while sending the request: {}".format(e))
-        restart_node(docker_id)
-
-
-@monitoring_demon.route('/delete_nodes', methods=['GET'])
-def delete_all_nodes():
-    to_remove = docker_client.containers.list(filters={"ancestor": "demonv1"})
-    for node in to_remove:
-        node.remove(force=True)
-    return "OK"
-
-
-def prepare_run(run):
-    spawn_multiple_nodes(run)
-    while not nodes_are_ready(run):
-        time.sleep(1)
-    save_run_to_database(run)
-    print("Run {} started".format(run.db_id), flush=True)
-    time.sleep(10)
-
-
 def save_query_in_database(run, i, failure_percent, target_key, time_to_query, total_messages_for_query, success):
     experiment.db.save_query_in_database(run.db_id, run.node_count, i, failure_percent, time_to_query,
                                          total_messages_for_query, success)
     pass
-
 
 def run_queries(run, query_count, failure_percent):
     docker_ip = parser.get('system_setting', 'docker_ip')
@@ -299,33 +353,13 @@ def run_queries(run, query_count, failure_percent):
         save_query_in_database(run, i, failure_percent, target_key, time_to_query, 
                               total_messages_for_query, success)
 
-
-def stop_node_percentage(run, percent):
-    print("stopping percentage of nodes: {}".format(percent))
-    if percent == 0:
-        return
-    nodes_to_stop_count = int(len(run.node_list) * percent)
-    indices = list(range(len(run.node_list)))
-    random_indices_to_stop = random.sample(indices, nodes_to_stop_count)
-    for i in random_indices_to_stop:
-        try:
-            container_to_stop = docker_client.containers.get(run.node_list[i]["id"])
-            container_to_stop.stop()
-            run.node_list[i]["is_alive"] = False
-            run.stopped_nodes[i] = run.node_list[i]
-        except Exception as e:
-            print("An error occurred while stopping container: {}".format(e))
-    print("{}% of nodes (n={}) are stopped".format(percent * 100, nodes_to_stop_count))
-    return
-
-
 def update_during_run(run):
     # TODO: stop percentage of nodes and check AoI etc. (update run.node_list or stop logic (convergence) if wanted)
     # before convergence do something
     while not run.is_converged:
         pass
-    print(parser.get('DemonParam', 'continue_after_convergence'))
-    if parser.get('DemonParam', 'continue_after_convergence') == "1":
+    print(parser.get('PriomonParam', 'continue_after_convergence'))
+    if parser.get('PriomonParam', 'continue_after_convergence') == "1":
         print("Convergence reached, continuing run")
         while not run.max_round_is_reached:
             pass
@@ -338,30 +372,10 @@ def update_during_run(run):
         time.sleep(20)
         run_queries(run, query_count=100, failure_percent=failure_ratio)
 
-
-def make_save_able_dic_from_run(run):
-    save_able_dic = {"node_count": run.node_count, "target_count": run.target_count, "gossip_rate": run.gossip_rate,
-                     "start_time": run.start_time, "convergence_time": run.convergence_time,
-                     "convergence_message_count": run.convergence_message_count,
-                     "convergence_round": run.convergence_round}
-    return save_able_dic
-
-
-def save_run_to_database(run):
-    run.db_id = experiment.db.insert_into_run(experiment.db_id, run.run, run.node_count, run.gossip_rate,
-                                              run.target_count)
-
-
-def save_converged_run_to_database(run):
-    experiment.db.insert_into_converged_run(run.db_id, run.convergence_round, run.convergence_message_count,
-                                            run.convergence_time)
-
-
 connection_pool = sqlite3.connect("NodeStorage.db", check_same_thread=False, isolation_level=None)
 database_lock = threading.Lock()
 
-
-@monitoring_demon.route('/push_data_to_database', methods=['POST'])
+@monitoring_priomon.route('/push_data_to_database', methods=['POST'])
 def push_data_to_database():
     client_ip = request.args.get('ip')
     client_port = request.args.get('port')
@@ -392,20 +406,18 @@ def push_data_to_database():
 
     return "OK"
 
-
-@monitoring_demon.route('/receive_ic', methods=['GET'])
+@monitoring_priomon.route('/receive_ic', methods=['GET'])
 def update_ic():
     client_ip = request.args['ip']
     client_port = request.args['port']
-    experiment.runs[-1].ip_per_ic[client_ip + ":" + client_port] = True
-    if len(experiment.runs[-1].ip_per_ic) == experiment.runs[-1].node_count:
-        run_converged(experiment.runs[-1])
+    with run_lock:
+        experiment.runs[-1].ip_per_ic[client_ip + ":" + client_port] = True
+        if len(experiment.runs[-1].ip_per_ic) == experiment.runs[-1].node_count:
+            run_converged(experiment.runs[-1])
     return "OK"
 
-
-@monitoring_demon.route('/receive_node_data', methods=['POST'])
+@monitoring_priomon.route('/receive_node_data', methods=['POST'])
 def update_data_entries_per_ip():
-    global experiment
     if not experiment:
         print("No experiment running, but a gossip node is trying to send data")
         return "NOK"
@@ -423,9 +435,10 @@ def update_data_entries_per_ip():
     ic = len(data_stored_in_node)
     bytes_of_data = len(json.dumps(data_stored_in_node).encode('utf-8'))
 
-    experiment.runs[-1].convergence_round = max(experiment.runs[-1].convergence_round, int(round))
-    experiment.runs[-1].message_count += 1
-    experiment.runs[-1].data_entries_per_ip[client_ip + ":" + client_port] = data_stored_in_node
+    with run_lock:
+        experiment.runs[-1].convergence_round = max(experiment.runs[-1].convergence_round, int(round))
+        experiment.runs[-1].message_count += 1
+        experiment.runs[-1].data_entries_per_ip[client_ip + ":" + client_port] = data_stored_in_node
     if not experiment.runs[-1].is_converged:
         if int(nd) > experiment.runs[-1].node_count:
             nd = experiment.runs[-1].node_count
@@ -459,9 +472,9 @@ def update_data_entries_per_ip():
             for metric_type, was_sent in node_data['metric_sent_flags'].items():
                 # Get metric value if available
                 metric_value = None
-                if 'appSate' in node_data and metric_type in node_data['appSate']:
+                if 'appState' in node_data and metric_type in node_data['appState']:
                     try:
-                        metric_value = float(node_data['appSate'][metric_type])
+                        metric_value = float(node_data['appState'][metric_type])
                     except (ValueError, TypeError):
                         pass
             
@@ -478,26 +491,23 @@ def update_data_entries_per_ip():
         experiment.runs[-1].max_round_is_reached = True
     return "OK"
 
-
 def generate_run(node_count, gossip_rate, target_count, run_count):
     if experiment.runs:
         return Run(node_count, gossip_rate, target_count, run_count, node_list=experiment.runs[-1].node_list)
     return Run(node_count, gossip_rate, target_count, run_count)
 
-
 def prepare_experiment(server_ip):
     global experiment
-    experiment = Experiment(json.loads(parser.get('DemonParam', 'node_range')),
-                            json.loads(parser.get('DemonParam', 'gossip_rate_range')),
-                            json.loads(parser.get('DemonParam', 'target_count_range')),
-                            json.loads(parser.get('DemonParam', 'runs')),
+    experiment = Experiment(json.loads(parser.get('PriomonParam', 'node_range')),
+                            json.loads(parser.get('PriomonParam', 'gossip_rate_range')),
+                            json.loads(parser.get('PriomonParam', 'target_count_range')),
+                            json.loads(parser.get('PriomonParam', 'runs')),
                             server_ip,
                             parser.get('system_setting', 'is_send_data_back'),
-                            parser.get('DemonParam', 'push_mode'))
+                            parser.get('PriomonParam', 'push_mode'))
     experiment.set_db_id(experiment.db.insert_into_experiment(time.time()))
     experiment.query_thread = threading.Thread(target=execute_queries_from_queue)
     experiment.query_thread.start()
-
 
 def print_experiment():
     experiment.query_queue.put(None)
@@ -506,12 +516,10 @@ def print_experiment():
         print("Run {}, converged after {} messages and {} seconds".format(run.node_count, run.convergence_message_count,
                                                                           run.convergence_time))
 
-
-@monitoring_demon.route('/start', methods=['GET'])
-def start_demon():
+@monitoring_priomon.route('/start', methods=['GET'])
+def start_priomon():
     server_ip = socket.gethostbyname(socket.gethostname())
     print("Server IP: {}".format(server_ip))
-    global experiment
     prepare_experiment(server_ip)
     for node_count in experiment.node_count_range:
         new_target_count_range = get_target_count(node_count, experiment.target_count_range)
@@ -530,31 +538,10 @@ def start_demon():
                     reset_run_sync(run)
     print_experiment()
     delete_all_nodes()
-    return "OK - Experiment finished - bussi k."
+    return "OK - Experiment finished"
 
-
-def create_and_start_demon_node(node_number, node_list, target_count, gossip_rate):
-    # Existing code...
-    
-    # Add metric priority configuration
-    node_data = {
-        # Existing fields...
-        "metric_priorities": {
-            "cpu": int(parser.get('MetricPriorities', 'cpu_priority', fallback=1)),
-            "memory": int(parser.get('MetricPriorities', 'memory_priority', fallback=5)),
-            "network": int(parser.get('MetricPriorities', 'network_priority', fallback=5)),
-            "storage": int(parser.get('MetricPriorities', 'storage_priority', fallback=10))
-        },
-        "metric_deltas": {
-            "cpu": float(parser.get('MetricDeltas', 'cpu_delta', fallback=5.0)),
-            "memory": float(parser.get('MetricDeltas', 'memory_delta', fallback=7.0)),
-            "network": float(parser.get('MetricDeltas', 'network_delta', fallback=15.0)),
-            "storage": float(parser.get('MetricDeltas', 'storage_delta', fallback=10.0))
-        }
-    }
-    
-    # Continue with existing code...
-
-
+def create_and_start_priomon_node(node_number, node_list, target_count, gossip_rate):    
+    # metric priority configuration is currently handled directly in the spawned nodes
+    pass
 if __name__ == "__main__":
-    monitoring_demon.run(host='0.0.0.0', port=4000, debug=False, threaded=True)
+    monitoring_priomon.run(host='0.0.0.0', port=parser.getint('PriomonParam', 'client_port'), debug=False, threaded=True)
