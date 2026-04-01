@@ -120,16 +120,16 @@ class Run:
         self.db_id = -1
         self.data_entries_per_ip = {}
         self.node_list = node_list or []
-        self.node_count = node_count
+        self.node_count = int(node_count)
         self.convergence_round = -1
         self.convergence_message_count = -1
         self.message_count = 0
         self.start_time = None
         self.convergence_time = None
         self.is_converged = False
-        self.gossip_rate = gossip_rate
-        self.target_count = target_count
-        self.run = run
+        self.gossip_rate = float(gossip_rate)
+        self.target_count = int(target_count)
+        self.run = int(run)
         self.db_collection = db_collection
         self.max_round_is_reached = False
         self.ip_per_ic = {}
@@ -440,10 +440,11 @@ def update_data_entries_per_ip():
         experiment.runs[-1].message_count += 1
         experiment.runs[-1].data_entries_per_ip[client_ip + ":" + client_port] = data_stored_in_node
     if not experiment.runs[-1].is_converged:
-        if int(nd) > experiment.runs[-1].node_count:
-            nd = experiment.runs[-1].node_count
-        if int(fd) > experiment.runs[-1].node_count:
-            fd = experiment.runs[-1].node_count
+        current_node_count = int(experiment.runs[-1].node_count)
+        if int(nd) > current_node_count:
+            nd = current_node_count
+        if int(fd) > current_node_count:
+            fd = current_node_count
         delete_parameters = (experiment.runs[-1].db_id, client_ip, client_port, round)
         insert_parameters = (experiment.runs[-1].db_id, client_ip, client_port, round, nd, fd, rm, ic, bytes_of_data)
         experiment.query_queue.put(
@@ -496,12 +497,37 @@ def generate_run(node_count, gossip_rate, target_count, run_count):
         return Run(node_count, gossip_rate, target_count, run_count, node_list=experiment.runs[-1].node_list)
     return Run(node_count, gossip_rate, target_count, run_count)
 
+def ensure_list(val):
+    if isinstance(val, str):
+        try:
+            # If it's a string like "[1,2,3]", parse it
+            loaded = json.loads(val)
+            # If the result is still a string (double encoded), go one level deeper
+            if isinstance(loaded, str):
+                return json.loads(loaded)
+            return loaded
+        except:
+            # Fallback for simple values
+            return [val]
+    return val if isinstance(val, list) else [val]
+
 def prepare_experiment(server_ip):
     global experiment
-    experiment = Experiment(json.loads(parser.get('PriomonParam', 'node_range')),
-                            json.loads(parser.get('PriomonParam', 'gossip_rate_range')),
-                            json.loads(parser.get('PriomonParam', 'target_count_range')),
-                            json.loads(parser.get('PriomonParam', 'runs')),
+    
+    # Robustly parse ranges from the config file
+    def get_range(section, key):
+        raw = parser.get(section, key)
+        return ensure_list(raw)
+
+    node_range = get_range('PriomonParam', 'node_range')
+    gossip_rate_range = get_range('PriomonParam', 'gossip_rate_range')
+    target_count_range = get_range('PriomonParam', 'target_count_range')
+    runs = int(parser.get('PriomonParam', 'runs'))
+
+    experiment = Experiment(node_range,
+                            gossip_rate_range,
+                            target_count_range,
+                            runs,
                             server_ip,
                             parser.get('system_setting', 'is_send_data_back'),
                             parser.get('PriomonParam', 'push_mode'))
