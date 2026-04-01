@@ -266,6 +266,27 @@ def prepare_run(run):
         time.sleep(1)
     save_run_to_database(run)
     print("Run {} started".format(run.db_id), flush=True)
+
+    # --- Notify dashboard of a new experiment run and its initial node set ---
+    def _notify_run_start():
+        try:
+            nodes = []
+            for node in run.node_list:
+                if node and 'ip' in node and 'port' in node:
+                    nodes.append({"ip": node['ip'], "port": node['port']})
+            
+            payload = {
+                "node_count": run.node_count,
+                "nodes": nodes,
+                "timestamp": time.time()
+            }
+            requests.post("http://localhost:5000/api/live-run-start", json=payload, timeout=2)
+        except Exception:
+            pass
+
+    threading.Thread(target=_notify_run_start, daemon=True).start()
+    # -------------------------------------------------------------------------
+    
     time.sleep(10)
 
 def check_if_all_nodes_are_reset(run):
@@ -490,6 +511,36 @@ def update_data_entries_per_ip():
     if int(round) >= 80:
         run_converged(experiment.runs[-1])
         experiment.runs[-1].max_round_is_reached = True
+
+    # Capture a local reference to the current run object to avoid reading
+    # the state of a "next" run if the orchestrator moves on while the 
+    # thread below is still executing.
+    current_run = experiment.runs[-1]
+
+    # --- Forward live metrics to the Express dashboard backend (non-blocking) ---
+    def _forward_to_dashboard():
+        try:
+            payload = {
+                "ip": client_ip,
+                "port": client_port,
+                "round": round,
+                "ic": ic,
+                "nd": nd,
+                "fd": fd,
+                "rm": rm,
+                "bytes_of_data": bytes_of_data,
+                "node_count": current_run.node_count,
+                "message_count": current_run.message_count,
+                "is_converged": current_run.is_converged,
+                "data_stored_in_node": list(data_stored_in_node.keys()),
+            }
+            requests.post("http://localhost:5000/api/live-metrics", json=payload, timeout=2)
+        except Exception:
+            pass  # dashboard may not be running; never block the experiment
+
+    threading.Thread(target=_forward_to_dashboard, daemon=True).start()
+    # ---------------------------------------------------------------------------
+
     return "OK"
 
 def generate_run(node_count, gossip_rate, target_count, run_count):
@@ -513,6 +564,9 @@ def ensure_list(val):
 
 def prepare_experiment(server_ip):
     global experiment
+    
+    # Reload the configuration file to pick up any changes from the dashboard
+    parser.read(os.path.join(os.path.dirname(__file__), 'config.ini'))
     
     # Robustly parse ranges from the config file
     def get_range(section, key):

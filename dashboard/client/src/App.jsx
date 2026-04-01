@@ -1,7 +1,10 @@
 import React from "react";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { io } from "socket.io-client";
+import ForceGraph2D from "react-force-graph-2d";
 
 const API_BASE = "http://localhost:5000/api";
+const SOCKET_URL = "http://localhost:5000";
 
 // ---------------------------------------------------------------------------
 // Utility helpers
@@ -73,7 +76,6 @@ function Spinner() {
 // Section card — renders one INI section dynamically
 // ---------------------------------------------------------------------------
 function SectionCard({ sectionKey, sectionData, onChange }) {
-  // Section colours mapped by index order
   const sectionMeta = {
     PriomonParam: { accent: "from-violet-500 to-indigo-600", dot: "bg-violet-400" },
     system_setting: { accent: "from-cyan-500 to-sky-600", dot: "bg-cyan-400" },
@@ -98,7 +100,6 @@ function SectionCard({ sectionKey, sectionData, onChange }) {
       {/* Key-value fields */}
       <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-5">
         {Object.entries(sectionData).map(([key, value]) => {
-          // Skip comment-only keys produced by the ini parser (start with ;)
           if (key.startsWith(";")) return null;
 
           const inputId = `${sectionKey}__${key}`;
@@ -135,6 +136,234 @@ function SectionCard({ sectionKey, sectionData, onChange }) {
 }
 
 // ---------------------------------------------------------------------------
+// Live Topology Graph component
+// ---------------------------------------------------------------------------
+function LiveTopologyGraph({ graphData, metricsLog, nodeCountMetadata }) {
+  const graphRef = useRef();
+
+  // Auto-center and configure forces when data arrived or node count changes
+  // useEffect(() => {
+  //   if (graphRef.current && graphData.nodes.length > 0) {
+  //     const fg = graphRef.current;
+
+  //     // Warm up and center the graph view
+  //     fg.zoomToFit(400, 100);
+
+  //     // Access the internal d3 simulation to fix the centering
+  //     const simulation = fg.d3Simulation();
+  //     if (simulation) {
+  //       const centerForce = simulation.force('center');
+  //       if (centerForce) {
+  //         centerForce.x(0).y(0);
+  //       }
+  //     }
+  //   }
+  // }, [graphData.nodes.length]);
+  useEffect(() => {
+    if (graphRef.current && graphData.nodes.length > 0) {
+      const fg = graphRef.current;
+
+      // 1. Configure the D3 force correctly using d3Force
+      const centerForce = fg.d3Force('center');
+      if (centerForce) {
+        centerForce.x(0).y(0);
+      }
+
+      // 2. Add a slight delay before zooming so coordinates are calculated
+      setTimeout(() => {
+        fg.zoomToFit(400, 100);
+      }, 150);
+    }
+  }, [graphData.nodes.length]);
+  // Paint nodes as gradient-filled circles with IP label
+  const paintNode = useCallback((node, ctx, globalScale) => {
+    const r = 8;
+    const { ic, node_count } = node;
+
+    // Status color mapping
+    let color = "#64748b"; // Running (Gray)
+    if (ic > 0) {
+      color = ic >= node_count ? "#10b981" : "#6366f1"; // Converged (Emerald) : Gossiping (Indigo)
+    }
+
+    // Outer glow
+    ctx.beginPath();
+    ctx.arc(node.x, node.y, r + 4, 0, 2 * Math.PI);
+    ctx.fillStyle = `${color}22`; // Very transparent version for glow
+    ctx.fill();
+
+    // Main circle
+    ctx.beginPath();
+    ctx.arc(node.x, node.y, r, 0, 2 * Math.PI);
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,0.3)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Label
+    const labelSize = Math.max(10 / globalScale, 3);
+    ctx.font = `${labelSize}px Inter, sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    ctx.fillStyle = "rgba(226, 232, 240, 0.9)";
+    ctx.fillText(node.label || node.id, node.x, node.y + r + 2);
+  }, []);
+
+  const nodeCount = graphData.nodes.length;
+  const linkCount = graphData.links.length;
+
+  return (
+    <div className="rounded-3xl bg-slate-800/40 border border-slate-700/50 backdrop-blur-md overflow-hidden shadow-2xl">
+      {/* Header */}
+      <div className="bg-gradient-to-r from-slate-800/80 to-slate-900/80 px-8 py-5 flex items-center justify-between border-b border-slate-700/50">
+        <div className="flex items-center gap-4">
+          <div className="relative">
+            <span className="absolute inset-0 rounded-full bg-emerald-500/20 blur-sm animate-pulse" />
+            <span className="relative block w-3 h-3 rounded-full bg-emerald-500" />
+          </div>
+          <h2 className="text-slate-100 font-bold text-lg tracking-tight">
+            Live Network Topology
+          </h2>
+        </div>
+        <div className="flex items-center gap-6 text-slate-400 text-xs font-mono font-medium">
+          <div className="bg-slate-900/50 px-3 py-1.5 rounded-lg border border-slate-700/30">
+            {nodeCount} Nodes
+          </div>
+          <div className="bg-slate-900/50 px-3 py-1.5 rounded-lg border border-slate-700/30">
+            {linkCount} Links
+          </div>
+          <div className="bg-slate-900/50 px-3 py-1.5 rounded-lg border border-slate-700/30">
+            {metricsLog.length} Data Points
+          </div>
+        </div>
+      </div>
+
+      {/* Graph canvas */}
+      <div className="relative" style={{ height: 500, background: "radial-gradient(circle at center, #1e293b 0%, #0f172a 100%)" }}>
+        {nodeCount === 0 ? (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="text-center">
+              <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-slate-900/50 border border-slate-700/50 flex items-center justify-center animate-pulse">
+                <svg className="w-8 h-8 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
+                </svg>
+              </div>
+              <p className="text-slate-200 text-sm font-semibold">Awaiting Live Metrics</p>
+              <p className="text-slate-500 text-xs mt-1 font-mono tracking-wide">Connect orchestrator to begin streaming</p>
+            </div>
+          </div>
+        ) : (
+          <ForceGraph2D
+            ref={graphRef}
+            graphData={graphData}
+            nodeCanvasObject={paintNode}
+            nodePointerAreaPaint={(node, color, ctx) => {
+              ctx.beginPath();
+              ctx.arc(node.x, node.y, 10, 0, 2 * Math.PI);
+              ctx.fillStyle = color;
+              ctx.fill();
+            }}
+            linkColor={() => "rgba(100, 116, 139, 0.25)"}
+            linkWidth={1.5}
+            linkDirectionalParticles={2}
+            linkDirectionalParticleWidth={2}
+            linkDirectionalParticleColor={() => "rgba(56, 189, 248, 0.4)"}
+            backgroundColor="transparent"
+            // width={undefined}
+            height={500}
+            cooldownTicks={100}
+            d3AlphaDecay={0.01}
+            d3VelocityDecay={0.3}
+          />
+        )}
+      </div>
+
+      {/* Structured Metrics Table */}
+      <div className="border-t border-slate-700/50 bg-slate-900/30">
+        <div className="px-8 py-4 border-b border-slate-700/20">
+          <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">
+            Real-Time Node Diagnostics
+          </h3>
+        </div>
+        <div className="max-h-[300px] overflow-y-auto overflow-x-hidden custom-scrollbar">
+          <table className="w-full text-left border-collapse">
+            <thead className="sticky top-0 bg-slate-900/90 backdrop-blur-md text-[10px] text-slate-500 uppercase font-mono border-b border-slate-800">
+              <tr>
+                <th className="px-8 py-3 font-medium">Node Endpoint</th>
+                <th className="px-4 py-3 font-medium">Round</th>
+                <th className="px-4 py-3 font-medium">ND</th>
+                <th className="px-4 py-3 font-medium">RM</th>
+                <th className="px-4 py-3 font-medium">Data</th>
+                <th className="px-4 py-3 font-medium">Convergence (IC)</th>
+                <th className="px-4 py-3 font-medium text-right pr-8">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800/40">
+              {Object.values(graphData.nodes_info || {}).sort((a, b) => b.lastSeen - a.lastSeen).map((node) => {
+                const isConverged = node.ic >= node.node_count && node.ic > 0;
+                const isGossiping = node.ic > 0 && !isConverged;
+
+                return (
+                  <tr key={node.id} className="hover:bg-slate-800/30 transition-colors duration-150">
+                    <td className="px-8 py-3.5 whitespace-nowrap">
+                      <div className="flex items-center gap-3">
+                        <div className={`w-2 h-2 rounded-full ${isConverged ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : isGossiping ? 'bg-indigo-500 animate-pulse' : 'bg-slate-600'}`} />
+                        <span className="text-slate-300 font-mono text-xs">{node.id}</span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3.5 font-mono text-[10px] text-slate-400">
+                      {node.round}
+                    </td>
+                    <td className="px-4 py-3.5 font-mono text-[10px] text-slate-400">
+                      {node.nd}
+                    </td>
+                    <td className="px-4 py-3.5 font-mono text-[10px] text-slate-400">
+                      {node.rm}
+                    </td>
+                    <td className="px-4 py-3.5 font-mono text-[10px] text-slate-400">
+                      {node.bytes_of_data < 1024 ? `${node.bytes_of_data}B` : `${(node.bytes_of_data / 1024).toFixed(1)}KB`}
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <div className="flex items-center gap-3">
+                        <div className="w-16 h-1 rounded-full bg-slate-800 overflow-hidden">
+                          <div
+                            className={`h-full transition-all duration-500 ${isConverged ? 'bg-emerald-500' : 'bg-indigo-500'}`}
+                            style={{ width: `${(node.ic / (node.node_count || 1)) * 100}%` }}
+                          />
+                        </div>
+                        <span className="text-slate-400 font-mono text-[10px]">
+                          {node.ic}/{node.node_count || '?'}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3.5 text-right pr-8">
+                      <span className={`
+                        text-[9px] font-bold px-2 py-1 rounded uppercase tracking-tighter
+                        ${isConverged ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20' :
+                          isGossiping ? 'bg-indigo-500/10 text-indigo-500 border border-indigo-500/20' :
+                            'bg-slate-700/30 text-slate-500 border border-slate-700/50'}
+                      `}>
+                        {isConverged ? 'Converged' : isGossiping ? 'Gossiping' : 'Running'}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {Object.keys(graphData.nodes_info || {}).length === 0 && (
+            <div className="py-12 text-center text-slate-600 font-mono text-[10px] uppercase tracking-widest">
+              Establishing node stream...
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main App
 // ---------------------------------------------------------------------------
 export default function App() {
@@ -143,7 +372,129 @@ export default function App() {
   const [fetchError, setFetchError] = useState(null);
   const [saving, setSaving] = useState(false);
   const [booting, setBooting] = useState(false);
-  const [toast, setToast] = useState(null); // { message, type }
+  const [toast, setToast] = useState(null);
+
+  // Live metrics state
+  const [graphData, setGraphData] = useState({ nodes: [], links: [], nodes_info: {} });
+  const [metricsLog, setMetricsLog] = useState([]);
+  const nodesMapRef = useRef(new Map());   // nodeId -> node object
+  const linksSetRef = useRef(new Set());   // "srcId->tgtId" dedup keys
+
+  // ---- Socket.io: connect and listen for live metrics ----------------------
+  useEffect(() => {
+    const socket = io(SOCKET_URL, { transports: ["websocket", "polling"] });
+
+    // Handle experiment initialization
+    socket.on("run_started", (initPayload) => {
+      const now = Date.now();
+      const initialNodesMap = new Map();
+      const nodeCount = initPayload.node_count || 1;
+
+      // Populate nodes as "Running"
+      initPayload.nodes.forEach((node) => {
+        const id = `${node.ip}:${node.port}`;
+        initialNodesMap.set(id, {
+          id,
+          label: id,
+          ic: 0,
+          node_count: nodeCount,
+          round: 0,
+          nd: 0,
+          rm: 0,
+          bytes_of_data: 0,
+          lastSeen: now,
+          // Initial fuzzy position near center to prevent (0,0) sticking
+          x: (Math.random() - 0.5) * 50,
+          y: (Math.random() - 0.5) * 50
+        });
+      });
+
+      nodesMapRef.current = initialNodesMap;
+      linksSetRef.current = new Set();
+      setMetricsLog([]);
+      setGraphData({
+        nodes: Array.from(initialNodesMap.values()),
+        links: [],
+        nodes_info: Object.fromEntries(initialNodesMap)
+      });
+    });
+
+    socket.on("new_metric", (payload) => {
+      const senderKey = `${payload.ip}:${payload.port}`;
+      const now = Date.now();
+
+      setMetricsLog((prev) => {
+        const next = [...prev, payload];
+        return next.length > 50 ? next.slice(-50) : next;
+      });
+
+      const nodesMap = nodesMapRef.current;
+      const linksSet = linksSetRef.current;
+
+      // Update or create reporter node
+      let senderNode = nodesMap.get(senderKey);
+      if (!senderNode) {
+        senderNode = {
+          id: senderKey,
+          label: senderKey,
+          x: (Math.random() - 0.5) * 50,
+          y: (Math.random() - 0.5) * 50
+        };
+        nodesMap.set(senderKey, senderNode);
+      }
+
+      // Update data properties (IN PLACE to preserve physics x,y)
+      Object.assign(senderNode, {
+        ic: payload.ic || 0,
+        node_count: payload.node_count || 1,
+        round: payload.round || 0,
+        nd: payload.nd || 0,
+        rm: payload.rm || 0,
+        bytes_of_data: payload.bytes_of_data || 0,
+        lastSeen: now
+      });
+
+      const peers = payload.data_stored_in_node || [];
+      peers.forEach((peerKey) => {
+        if (peerKey === senderKey) return;
+
+        if (!nodesMap.has(peerKey)) {
+          nodesMap.set(peerKey, {
+            id: peerKey,
+            label: peerKey,
+            ic: 0,
+            node_count: payload.node_count || 1,
+            round: 0,
+            nd: 0,
+            rm: 0,
+            bytes_of_data: 0,
+            lastSeen: now,
+            x: (Math.random() - 0.5) * 100,
+            y: (Math.random() - 0.5) * 100
+          });
+        }
+
+        const edgeA = `${senderKey}->${peerKey}`;
+        const edgeB = `${peerKey}->${senderKey}`;
+        if (!linksSet.has(edgeA) && !linksSet.has(edgeB)) {
+          linksSet.add(edgeA);
+        }
+      });
+
+      const nodes = Array.from(nodesMap.values());
+      const links = Array.from(linksSet).map((key) => {
+        const [source, target] = key.split("->");
+        return { source, target };
+      });
+      const nodes_info = Object.fromEntries(nodesMap);
+
+      setGraphData({ nodes, links, nodes_info });
+    });
+
+    return () => {
+      socket.disconnect();
+    };
+  }, []);
 
   // ---- Load config on mount ------------------------------------------------
   useEffect(() => {
@@ -244,12 +595,11 @@ export default function App() {
       </div>
 
       <div className="relative max-w-5xl mx-auto px-6 py-12">
-        {/* ----------------------------------------------------------------- */}
+        {/* --------------------------------------------------------------- */}
         {/* Header */}
-        {/* ----------------------------------------------------------------- */}
+        {/* --------------------------------------------------------------- */}
         <header className="mb-12">
           <div className="flex items-center gap-3 mb-1">
-            {/* Logo mark */}
             <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-violet-500/30">
               <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18" />
@@ -268,9 +618,9 @@ export default function App() {
           </p>
         </header>
 
-        {/* ----------------------------------------------------------------- */}
+        {/* --------------------------------------------------------------- */}
         {/* Config section cards — dynamically rendered */}
-        {/* ----------------------------------------------------------------- */}
+        {/* --------------------------------------------------------------- */}
         <section className="space-y-6 mb-10">
           {Object.entries(config).map(([sectionKey, sectionData]) => {
             if (typeof sectionData !== "object" || sectionData === null) return null;
@@ -285,10 +635,10 @@ export default function App() {
           })}
         </section>
 
-        {/* ----------------------------------------------------------------- */}
+        {/* --------------------------------------------------------------- */}
         {/* Action bar */}
-        {/* ----------------------------------------------------------------- */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4">
+        {/* --------------------------------------------------------------- */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4 mb-10">
           {/* Save button */}
           <button
             id="btn-save-config"
@@ -317,7 +667,7 @@ export default function App() {
             )}
           </button>
 
-          {/* Start experiment button — prominent */}
+          {/* Start experiment button */}
           <button
             id="btn-start-experiment"
             onClick={handleStart}
@@ -335,7 +685,6 @@ export default function App() {
               disabled:shadow-violet-500/10
             "
           >
-            {/* Subtle animated ring when idle */}
             {!booting && (
               <span className="absolute inset-0 rounded-xl ring-1 ring-violet-400/30 animate-pulse" />
             )}
@@ -356,9 +705,16 @@ export default function App() {
           </button>
         </div>
 
-        {/* ----------------------------------------------------------------- */}
+        {/* --------------------------------------------------------------- */}
+        {/* Live Network Topology Graph */}
+        {/* --------------------------------------------------------------- */}
+        <section className="mb-10">
+          <LiveTopologyGraph graphData={graphData} metricsLog={metricsLog} />
+        </section>
+
+        {/* --------------------------------------------------------------- */}
         {/* Footer */}
-        {/* ----------------------------------------------------------------- */}
+        {/* --------------------------------------------------------------- */}
         <footer className="mt-16 text-center text-slate-700 text-xs">
           PrioMon Control Center · API on{" "}
           <span className="font-mono text-slate-600">:5000</span> · Orchestrator on{" "}
@@ -366,9 +722,9 @@ export default function App() {
         </footer>
       </div>
 
-      {/* ------------------------------------------------------------------- */}
+      {/* ----------------------------------------------------------------- */}
       {/* Toast */}
-      {/* ------------------------------------------------------------------- */}
+      {/* ----------------------------------------------------------------- */}
       {toast && (
         <Toast
           message={toast.message}
