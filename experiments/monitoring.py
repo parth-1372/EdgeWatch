@@ -134,6 +134,8 @@ class Run:
         self.max_round_is_reached = False
         self.ip_per_ic = {}
         self.stopped_nodes = {}
+        self.manually_killed_count = 0  # Incremented when dashboard kills a node
+        self.killed_node_keys = set()    # Set of "ip:port" manually killed
 
     def set_db_id(self, param):
         self.db_id = param
@@ -233,7 +235,21 @@ def restart_all_nodes(run):
             executor.submit(restart_node, run.node_list[i]["id"])
     print("Restart time: {}".format(time.time() - start), flush=True)
 
-def start_node(index, run, database_address, monitoring_address, ip):
+# def start_node(index, run, database_address, monitoring_address, ip):
+#     to_send = {"node_list": run.node_list, "target_count": run.target_count, "gossip_rate": run.gossip_rate,
+#                "database_address": database_address, "monitoring_address": monitoring_address,
+#                "node_ip": run.node_list[index]["ip"], "is_send_data_back": experiment.is_send_data_back,
+#                "push_mode": experiment.push_mode, "client_port": parser.get('PriomonParam', 'client_port')}
+#     try:
+#         time.sleep(0.01)
+#         session.post("http://{}:{}/start_node".format(ip, run.node_list[index]["port"]), json=to_send)
+#     except Exception as e:
+#         print("Node not started: {}".format(e))
+#         start_node(index, run, database_address, monitoring_address, ip)
+def start_node(index, run, database_address, monitoring_address, ip, retries=0):
+    if retries > 5:
+        print(f"Giving up starting node {index} after 5 retries. It may have been killed.")
+        return
     to_send = {"node_list": run.node_list, "target_count": run.target_count, "gossip_rate": run.gossip_rate,
                "database_address": database_address, "monitoring_address": monitoring_address,
                "node_ip": run.node_list[index]["ip"], "is_send_data_back": experiment.is_send_data_back,
@@ -242,16 +258,16 @@ def start_node(index, run, database_address, monitoring_address, ip):
         time.sleep(0.01)
         session.post("http://{}:{}/start_node".format(ip, run.node_list[index]["port"]), json=to_send)
     except Exception as e:
-        print("Node not started: {}".format(e))
-        start_node(index, run, database_address, monitoring_address, ip)
-
+        print(f"Node {index} not started: {e}. Retrying...")
+        time.sleep(0.5)
+        start_node(index, run, database_address, monitoring_address, ip, retries + 1)
 def start_run(run, monitoring_address):
     database_address = parser.get('database', 'db_file')
     ip = parser.get('system_setting', 'docker_ip')
+    run.start_time = time.time()
     with concurrent.futures.ThreadPoolExecutor(max_workers=run.node_count) as executor:
         for i in range(0, run.node_count):
             executor.submit(start_node, i, run, database_address, monitoring_address, ip)
-    run.start_time = time.time()
 
 def reset_run_sync(run):
     ip = parser.get('system_setting', 'docker_ip')
@@ -277,6 +293,7 @@ def prepare_run(run):
             
             payload = {
                 "node_count": run.node_count,
+                "active_target": run.node_count,
                 "nodes": nodes,
                 "timestamp": time.time()
             }
@@ -314,29 +331,62 @@ def stop_node_percentage(run, percent):
     return
 
 def run_converged(run):
+    if run.is_converged:
+        return
     run.convergence_message_count = run.message_count
-    run.convergence_time = (time.time() - run.start_time)
-    # TODO: set convergence round
-    if not run.is_converged:
-        print("Convergence time: {}".format(run.convergence_time))
-        print("Convergence message count: {}".format(run.convergence_message_count))
-
+    # Guard against start_time race condition — should not happen after the fix,
+    # but we protect here as a safety net.
+    if run.start_time is not None:
+        run.convergence_time = time.time() - run.start_time
+    else:
+        run.convergence_time = 0.0
+    print("Convergence time: {}".format(run.convergence_time))
+    print("Convergence message count: {}".format(run.convergence_message_count))
     run.is_converged = True
 
-def check_convergence(run):
+
+def check_convergence(run, data_stored_in_node):
+    """
+    Convergence is reached when every *alive* peer in the gossip snapshot
+    holds an entry in this node's data store AND every entry has a counter.
+
+    Key insight for chaos testing:
+    When a node is killed, the survivors stop hearing from it and eventually
+    delete it from their node_list (3-strike rule in node.py).  At that point,
+    the killed node no longer appears in data_stored_in_node.  We count how
+    many unique alive peers appear in the snapshot, and declare convergence
+    when all of them agree on the same alive set.
+
+    We also honour run.manually_killed_count so that the node_count target
+    is immediately lowered as soon as the dashboard kills a node manually
+    (before the 3-strike eviction propagates through the network).
+    """
     if run.is_converged:
         return True
-    if len(run.data_entries_per_ip) < run.node_count:
+
+    # Count how many peers this reporter currently believes are alive
+    alive_peers = {
+        peer for peer, d in data_stored_in_node.items()
+        if d.get("hbState", {}).get("nodeAlive", True)
+    }
+
+    # Subtract nodes that have been manually killed and registered with us
+    expected_count = run.node_count - run.manually_killed_count
+    if expected_count <= 0:
+        return False  # Everyone is dead — nothing to declare
+
+    # We need enough alive peers (>= expected survivors) AND all must have a counter
+    if len(alive_peers) < expected_count:
         return False
-    for ip in run.data_entries_per_ip:
-        if len(run.data_entries_per_ip[ip]) < run.node_count:
+
+    for peer in alive_peers:
+        peer_data = data_stored_in_node.get(peer, {})
+        if "counter" not in peer_data:
             return False
-        if len(run.data_entries_per_ip[ip]) > run.node_count:
-            return False
-        for node_data in run.data_entries_per_ip[ip]:
-            if "counter" not in run.data_entries_per_ip[ip][node_data]:
-                return False
+
     run_converged(run)
+    return True
+
 
 def save_query_in_database(run, i, failure_percent, target_key, time_to_query, total_messages_for_query, success):
     experiment.db.save_query_in_database(run.db_id, run.node_count, i, failure_percent, time_to_query,
@@ -378,12 +428,12 @@ def update_during_run(run):
     # TODO: stop percentage of nodes and check AoI etc. (update run.node_list or stop logic (convergence) if wanted)
     # before convergence do something
     while not run.is_converged:
-        pass
+        time.sleep(0.1)
     print(parser.get('PriomonParam', 'continue_after_convergence'))
     if parser.get('PriomonParam', 'continue_after_convergence') == "1":
         print("Convergence reached, continuing run")
         while not run.max_round_is_reached:
-            pass
+            time.sleep(0.1)
         print("Max round reached: stop now")
     print("should start queries now")
     if parser.get('system_setting', 'query_logic') == "1":
@@ -394,6 +444,11 @@ def update_during_run(run):
         run_queries(run, query_count=100, failure_percent=failure_ratio)
 
 connection_pool = sqlite3.connect("NodeStorage.db", check_same_thread=False, isolation_level=None)
+# Schema Initialization for NodeStorage.db
+with connection_pool:
+    connection_pool.execute("CREATE TABLE IF NOT EXISTS unique_entries (id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT, value TEXT)")
+    connection_pool.execute("CREATE TABLE IF NOT EXISTS data_entries (id INTEGER PRIMARY KEY AUTOINCREMENT, node TEXT, round INTEGER, key TEXT, unique_entry_id INTEGER)")
+
 database_lock = threading.Lock()
 
 @monitoring_priomon.route('/push_data_to_database', methods=['POST'])
@@ -427,6 +482,29 @@ def push_data_to_database():
 
     return "OK"
 
+@monitoring_priomon.route('/notify_node_killed', methods=['POST'])
+def notify_node_killed():
+    """
+    Called by the dashboard Chaos Engine after a soft-kill HTTP request
+    succeeds.  We immediately lower the convergence target so the remaining
+    nodes can declare convergence without waiting for the 3-strike timeout.
+    """
+    data = request.get_json(silent=True) or {}
+    killed_ip = data.get("ip", "")
+    with run_lock:
+        if experiment and experiment.runs:
+            run = experiment.runs[-1]
+            run.manually_killed_count += 1
+            # Erase the killed node from the gossip snapshot so the next
+            # convergence check doesn't wait for its data any more.
+            killed_key = data.get("ip", "") + ":" + str(data.get("port", ""))
+            run.killed_node_keys.add(killed_key)
+            run.data_entries_per_ip.pop(killed_key, None)
+            print("[Chaos] Node {} manually killed. New target: {}/{}".format(
+                killed_ip, run.node_count - run.manually_killed_count, run.node_count))
+    return "OK"
+
+
 @monitoring_priomon.route('/receive_ic', methods=['GET'])
 def update_ic():
     client_ip = request.args['ip']
@@ -455,11 +533,15 @@ def update_data_entries_per_ip():
 
     ic = len(data_stored_in_node)
     bytes_of_data = len(json.dumps(data_stored_in_node).encode('utf-8'))
-
     with run_lock:
         experiment.runs[-1].convergence_round = max(experiment.runs[-1].convergence_round, int(round))
         experiment.runs[-1].message_count += 1
         experiment.runs[-1].data_entries_per_ip[client_ip + ":" + client_port] = data_stored_in_node
+        check_convergence(experiment.runs[-1], data_stored_in_node)  # <-- FIX: Passed the data_stored_in_node variable
+        if int(round) >= 80:
+            run_converged(experiment.runs[-1])
+            experiment.runs[-1].max_round_is_reached = True
+
     if not experiment.runs[-1].is_converged:
         current_node_count = int(experiment.runs[-1].node_count)
         if int(nd) > current_node_count:
@@ -506,11 +588,6 @@ def update_data_entries_per_ip():
                 experiment.query_queue.put((
                     "INSERT INTO metric_transmissions (run_id, node_ip, node_port, round, metric_type, was_sent, metric_value, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                     metric_params))
-    
-    check_convergence(experiment.runs[-1])
-    if int(round) >= 80:
-        run_converged(experiment.runs[-1])
-        experiment.runs[-1].max_round_is_reached = True
 
     # Capture a local reference to the current run object to avoid reading
     # the state of a "next" run if the orchestrator moves on while the 
@@ -520,19 +597,52 @@ def update_data_entries_per_ip():
     # --- Forward live metrics to the Express dashboard backend (non-blocking) ---
     def _forward_to_dashboard():
         try:
+            peer_status = {}
+            for peer, p_data in data_stored_in_node.items():
+                if "hbState" in p_data:
+                    peer_status[peer] = {
+                        "isAlive": p_data["hbState"].get("nodeAlive", True),
+                        "failCount": p_data["hbState"].get("failureCount", 0)
+                    }
+                else:
+                    peer_status[peer] = {"isAlive": True, "failCount": 0}
+
+            # Extract THIS node's own metrics from the gossip snapshot
+            # so the dashboard Inspector can show real values.
+            sender_key = client_ip + ":" + client_port
+            sender_entry = data_stored_in_node.get(sender_key, {})
+            app_state = sender_entry.get("appState", {})
+
+            # FORCE-FILTER: Remove nodes that we know are manually killed
+            # (Gossip survivors might still think they are alive for 3 rounds)
+            filtered_data = {k: v for k, v in data_stored_in_node.items() if k not in current_run.killed_node_keys}
+
+            # Calculate active_ic (only count peers that are alive and not manually killed)
+            active_ic = sum(1 for p, d in filtered_data.items() if d.get("hbState", {}).get("nodeAlive", True))
+
+            # Update nd to match the filtered reality
+            filtered_nd = len(filtered_data)
+
             payload = {
                 "ip": client_ip,
                 "port": client_port,
                 "round": round,
-                "ic": ic,
-                "nd": nd,
+                "ic": active_ic,
+                "nd": filtered_nd,
                 "fd": fd,
                 "rm": rm,
                 "bytes_of_data": bytes_of_data,
                 "node_count": current_run.node_count,
+                "active_target": current_run.node_count - current_run.manually_killed_count,
                 "message_count": current_run.message_count,
                 "is_converged": current_run.is_converged,
-                "data_stored_in_node": list(data_stored_in_node.keys()),
+                "data_stored_in_node": list(filtered_data.keys()),
+                "peer_status": peer_status,
+                # Top-level metric fields for the dashboard Inspector
+                "cpu":     app_state.get("cpu",     "not_updated"),
+                "memory":  app_state.get("memory",  "not_updated"),
+                "network": app_state.get("network", "not_updated"),
+                "storage": app_state.get("storage", "not_updated"),
             }
             requests.post("http://localhost:5000/api/live-metrics", json=payload, timeout=2)
         except Exception:
@@ -596,7 +706,7 @@ def print_experiment():
         print("Run {}, converged after {} messages and {} seconds".format(run.node_count, run.convergence_message_count,
                                                                           run.convergence_time))
 
-@monitoring_priomon.route('/start', methods=['GET'])
+@monitoring_priomon.route('/start', methods=['GET', 'POST'])
 def start_priomon():
     server_ip = socket.gethostbyname(socket.gethostname())
     print("Server IP: {}".format(server_ip))

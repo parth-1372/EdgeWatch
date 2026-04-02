@@ -1,5 +1,5 @@
 import React from "react";
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { io } from "socket.io-client";
 import ForceGraph2D from "react-force-graph-2d";
 
@@ -17,6 +17,11 @@ function sectionLabel(key) {
   return key
     .replace(/_/g, " ")
     .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/** Extract only the IP from "ip:port" string */
+function ipOnly(nodeId) {
+  return nodeId ? nodeId.split(":")[0] : nodeId;
 }
 
 // ---------------------------------------------------------------------------
@@ -73,32 +78,43 @@ function Spinner() {
 }
 
 // ---------------------------------------------------------------------------
-// Section card — renders one INI section dynamically
+// VoI Efficiency Badge — shown in header
+// ---------------------------------------------------------------------------
+function GlobalEfficiencyBadge({ savingsPercent }) {
+  return (
+    <div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1.5 rounded-lg shadow-inner cursor-help" title="Percentage of redundant network updates successfully filtered by the Value-of-Information logic.">
+      <span className="text-[10px] font-black text-emerald-400 uppercase tracking-widest">VoI Efficiency</span>
+      <span className="text-sm font-mono font-bold text-emerald-300">{savingsPercent.toFixed(1)}%</span>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// SectionCard — renders one INI section with editable inputs (v1.2 styling)
 // ---------------------------------------------------------------------------
 function SectionCard({ sectionKey, sectionData, onChange }) {
   const sectionMeta = {
-    PriomonParam: { accent: "from-violet-500 to-indigo-600", dot: "bg-violet-400" },
-    system_setting: { accent: "from-cyan-500 to-sky-600", dot: "bg-cyan-400" },
-    database: { accent: "from-amber-500 to-orange-600", dot: "bg-amber-400" },
+    PriomonParam: { accent: "from-violet-500/20 to-indigo-600/20", border: "border-violet-500/30", text: "text-violet-400" },
+    system_setting: { accent: "from-cyan-500/20 to-sky-600/20", border: "border-cyan-500/30", text: "text-cyan-400" },
+    database: { accent: "from-amber-500/20 to-orange-600/20", border: "border-amber-500/30", text: "text-amber-400" },
   };
 
   const meta = sectionMeta[sectionKey] || {
-    accent: "from-slate-500 to-slate-700",
-    dot: "bg-slate-400",
+    accent: "from-slate-500/20 to-slate-700/20",
+    border: "border-slate-500/30",
+    text: "text-slate-400",
   };
 
   return (
-    <div className="rounded-2xl bg-slate-800/60 border border-slate-700/50 backdrop-blur-sm overflow-hidden shadow-xl">
-      {/* Card header */}
-      <div className={`bg-gradient-to-r ${meta.accent} px-6 py-4 flex items-center gap-3`}>
-        <span className={`w-2.5 h-2.5 rounded-full ${meta.dot} shadow-lg`} />
-        <h2 className="text-white font-semibold text-base tracking-wide font-mono">
+    <div className={`col-span-1 rounded-3xl bg-slate-900/40 border ${meta.border} backdrop-blur-md overflow-hidden transition-all hover:bg-slate-900/60 flex flex-col h-full`}>
+      <div className={`bg-gradient-to-r ${meta.accent} px-6 py-4 border-b ${meta.border} flex items-center gap-3 shrink-0`}>
+        <div className="w-1.5 h-1.5 rounded-full bg-white opacity-50 shadow-[0_0_8px_rgba(255,255,255,0.4)]" />
+        <h2 className={`text-[10px] font-black uppercase tracking-[0.3em] ${meta.text}`}>
           [{sectionKey}]
         </h2>
       </div>
 
-      {/* Key-value fields */}
-      <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-5">
+      <div className="p-6 grid grid-cols-1 gap-y-5 overflow-y-auto flex-1 custom-scrollbar">
         {Object.entries(sectionData).map(([key, value]) => {
           if (key.startsWith(";")) return null;
 
@@ -106,11 +122,8 @@ function SectionCard({ sectionKey, sectionData, onChange }) {
           const strVal = value === null || value === undefined ? "" : String(value);
 
           return (
-            <div key={key} className="flex flex-col gap-1.5">
-              <label
-                htmlFor={inputId}
-                className="text-xs font-semibold text-slate-400 uppercase tracking-widest"
-              >
+            <div key={key} className="flex flex-col gap-2">
+              <label htmlFor={inputId} className="text-[9px] font-bold text-slate-500 uppercase tracking-widest pl-1">
                 {sectionLabel(key)}
               </label>
               <input
@@ -119,10 +132,10 @@ function SectionCard({ sectionKey, sectionData, onChange }) {
                 value={strVal}
                 onChange={(e) => onChange(sectionKey, key, e.target.value)}
                 className="
-                  bg-slate-900/70 border border-slate-600/60 rounded-lg px-4 py-2.5
-                  text-slate-100 text-sm font-mono placeholder-slate-600
-                  focus:outline-none focus:ring-2 focus:ring-violet-500/50 focus:border-violet-500
-                  transition-all duration-150
+                  bg-black/40 border border-white/5 rounded-xl px-4 py-2.5
+                  text-slate-100 text-xs font-mono placeholder-slate-700
+                  focus:outline-none focus:ring-1 focus:ring-white/20 focus:border-white/20
+                  transition-all duration-200
                 "
                 spellCheck={false}
                 autoComplete="off"
@@ -136,122 +149,261 @@ function SectionCard({ sectionKey, sectionData, onChange }) {
 }
 
 // ---------------------------------------------------------------------------
+// ResourceCard — used in Node Inspector 2x2 grid
+// ---------------------------------------------------------------------------
+function ResourceCard({ label, value, unit = "", icon, isFiltered }) {
+  let displayValue = value;
+  if (isNumeric(value)) {
+    displayValue = parseFloat(value).toFixed(2);
+  }
+
+  return (
+    <div className="relative bg-slate-900/50 border border-slate-700/50 rounded-xl p-3 flex flex-col gap-1 overflow-hidden transition-all hover:bg-slate-900/80">
+      {isFiltered && (
+        <div className="absolute top-1.5 right-1.5">
+          <div className="w-1.5 h-1.5 rounded-full bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.6)] animate-pulse" title="VoI Filtered (Stale Value)" />
+        </div>
+      )}
+      <div className="flex items-center gap-2 text-slate-500">
+        {icon}
+        <span className="text-[9px] font-bold uppercase tracking-wider">{label}</span>
+      </div>
+      <div className="flex items-baseline gap-1 mt-0.5">
+        <span className={`text-lg font-mono font-bold ${isFiltered ? 'text-slate-400' : 'text-white'}`}>
+          {displayValue}
+        </span>
+        <span className="text-[9px] text-slate-600 font-medium">{unit}</span>
+      </div>
+      <div className="mt-2 w-full h-1 bg-slate-800 rounded-full overflow-hidden">
+        <div
+          className={`h-full transition-all duration-700 ${isNumeric(value) ? (value > 80 ? 'bg-red-500' : value > 50 ? 'bg-amber-500' : 'bg-emerald-500') : 'bg-slate-700'}`}
+          style={{ width: `${isNumeric(value) ? Math.min(value, 100) : 0}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// NodeInspector — floating side-panel overlay for a selected node
+// ---------------------------------------------------------------------------
+function NodeInspector({ nodeId, nodesInfo, onClose, totalGlobalMessages, totalGlobalFiltered, killedNodes }) {
+  const node = nodesInfo[nodeId];
+
+  if (!node) return null;
+
+  const appState = node.appState || {};
+  const isKilled = node.isDead || killedNodes.has(nodeId);
+
+  const cpu = appState.cpu ?? "0";
+  const memory = appState.memory ?? "0";
+  const network = appState.network ?? "0";
+  const storage = appState.storage ?? "0";
+
+  const isCpuFiltered = appState._isCpuFiltered;
+  const isMemoryFiltered = appState._isMemoryFiltered;
+  const isNetworkFiltered = appState._isNetworkFiltered;
+  const isStorageFiltered = appState._isStorageFiltered;
+  const activeNodeCount = node.active_target || Math.max((node.node_count || 1) - killedNodes.size, 1);
+  const isConverged = node.ic >= activeNodeCount && node.ic > 0;
+  const isGossiping = node.ic > 0 && !isConverged;
+  const statusLabel = isKilled ? "TERMINATED" : isConverged ? "Converged" : isGossiping ? "Gossiping" : "Running";
+  const statusColor = isKilled
+    ? "text-red-500 bg-red-500/10 border-red-500/30"
+    : isConverged
+      ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/20"
+      : isGossiping
+        ? "text-indigo-400 bg-indigo-500/10 border-indigo-500/20"
+        : "text-slate-400 bg-slate-700/30 border-slate-700/50";
+
+  const nodeTotal = node.totalMessages || 1;
+  const nodeFiltered = node.filteredMessages || 0;
+  const nodeSavings = (nodeFiltered / nodeTotal) * 100;
+
+  return (
+    <div
+      className={`fixed top-0 right-0 h-full w-85 z-40 flex flex-col transition-transform duration-300 transform ${nodeId ? 'translate-x-0' : 'translate-x-full'}`}
+      style={{
+        background: "rgba(10, 15, 25, 0.92)",
+        backdropFilter: "blur(24px)",
+        borderLeft: "1px solid rgba(100, 116, 139, 0.2)",
+        boxShadow: "-24px 0 64px rgba(0,0,0,0.8)",
+      }}
+    >
+      <div className="px-6 pt-8 pb-5 border-b border-white/5 flex items-start justify-between gap-3">
+        <div className="flex-1">
+          <div className="flex items-center gap-2 mb-2">
+            <span className={`w-2 h-2 rounded-full ${isKilled ? 'bg-red-500' : isConverged ? 'bg-emerald-500' : 'bg-indigo-500'} animate-pulse`} />
+            <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.25em]">
+              {isKilled ? 'Chaos Event Log' : 'Node Diagnostic'}
+            </p>
+          </div>
+          <p className="text-xl font-mono text-white font-bold break-all leading-tight">
+            {nodeId}
+          </p>
+          <div className="flex items-center gap-3 mt-3">
+            <span className={`inline-block text-[10px] font-black px-2.5 py-1 rounded border uppercase tracking-wider ${statusColor}`}>
+              {statusLabel}
+            </span>
+            <div className="flex items-center gap-1.5 bg-slate-800/50 px-2.5 py-1 rounded-lg border border-slate-700/30">
+              <span className="text-[9px] font-bold text-slate-500 uppercase tracking-tighter">Savings:</span>
+              <span className="text-[10px] font-mono font-bold text-emerald-400">{nodeSavings.toFixed(0)}%</span>
+            </div>
+          </div>
+        </div>
+        <button onClick={onClose} className="mt-1 w-8 h-8 rounded-xl flex items-center justify-center text-slate-500 hover:text-white hover:bg-white/10 transition-all border border-transparent hover:border-white/20 active:scale-95">
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-6 py-6 custom-scrollbar space-y-8">
+        <section>
+          <div className="flex items-center justify-between mb-4">
+            <h4 className="text-[10px] font-black text-cyan-400 uppercase tracking-[0.2em]">Real-Time Resources</h4>
+            {isCpuFiltered || isMemoryFiltered || isNetworkFiltered || isStorageFiltered ? (
+              <span className="text-[9px] text-amber-500/80 font-bold flex items-center gap-1.5">
+                <span className="w-1 h-1 rounded-full bg-amber-500 animate-pulse" /> VoI Active
+              </span>
+            ) : null}
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <ResourceCard label="CPU Load" value={cpu} unit="%" isFiltered={isCpuFiltered} icon={<svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" /></svg>} />
+            <ResourceCard label="Memory" value={memory} unit="%" isFiltered={isMemoryFiltered} icon={<svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>} />
+            <ResourceCard label="Bandwidth" value={network} unit="Mbps" isFiltered={isNetworkFiltered} icon={<svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" /></svg>} />
+            <ResourceCard label="Disk Usage" value={storage} unit="%" isFiltered={isStorageFiltered} icon={<svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" /></svg>} />
+          </div>
+        </section>
+
+        <section className="bg-slate-900/40 rounded-2xl p-5 border border-white/5">
+          <h4 className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.2em] mb-4">Gossip Propagation</h4>
+          <div className="space-y-4">
+            <div className="flex justify-between items-center">
+              <span className="text-xs text-slate-400 font-medium">Round Progress</span>
+              <span className="text-xs font-mono font-bold text-white"># {node.round ?? 0}</span>
+            </div>
+            <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+              <div className="h-full bg-indigo-500 transition-all duration-300" style={{ width: `${Math.min((node.round / 1000) * 100, 100)}%` }} />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4 mt-6">
+              <div>
+                <p className="text-[9px] font-bold text-slate-500 uppercase mb-1">Discovered</p>
+                <p className="text-sm font-mono font-bold text-white">
+                  {Math.max(node.nd ?? 0, node.ic ?? 1)} <span className="text-[10px] font-normal text-slate-500">Nodes</span>
+                </p>
+              </div>
+              <div>
+                <p className="text-[9px] font-bold text-slate-500 uppercase mb-1">Convergence</p>
+                <p className="text-sm font-mono font-bold text-white">
+                  {Math.min(node.ic ?? 0, activeNodeCount)} / {activeNodeCount}
+                </p>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div className="px-6 py-5 border-t border-white/5 bg-slate-950/50">
+        <div className="flex items-center justify-between">
+          <span className="text-[9px] font-mono text-slate-600">ID: {nodeId.split(':').pop()}</span>
+          <span className="text-[9px] font-mono text-emerald-600 font-bold">LIVE STREAMING</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Live Topology Graph component
 // ---------------------------------------------------------------------------
-function LiveTopologyGraph({ graphData, metricsLog, nodeCountMetadata }) {
+function LiveTopologyGraph({ graphData, metricsLog, onSelectNode, killedNodes, onKillNode, selectedNodeId }) {
   const graphRef = useRef();
 
-  // Auto-center and configure forces when data arrived or node count changes
-  // useEffect(() => {
-  //   if (graphRef.current && graphData.nodes.length > 0) {
-  //     const fg = graphRef.current;
-
-  //     // Warm up and center the graph view
-  //     fg.zoomToFit(400, 100);
-
-  //     // Access the internal d3 simulation to fix the centering
-  //     const simulation = fg.d3Simulation();
-  //     if (simulation) {
-  //       const centerForce = simulation.force('center');
-  //       if (centerForce) {
-  //         centerForce.x(0).y(0);
-  //       }
-  //     }
-  //   }
-  // }, [graphData.nodes.length]);
   useEffect(() => {
     if (graphRef.current && graphData.nodes.length > 0) {
       const fg = graphRef.current;
-
-      // 1. Configure the D3 force correctly using d3Force
       const centerForce = fg.d3Force('center');
-      if (centerForce) {
-        centerForce.x(0).y(0);
-      }
-
-      // 2. Add a slight delay before zooming so coordinates are calculated
-      setTimeout(() => {
-        fg.zoomToFit(400, 100);
-      }, 150);
+      if (centerForce) centerForce.x(0).y(0);
+      setTimeout(() => fg.zoomToFit(400, 100), 150);
     }
   }, [graphData.nodes.length]);
-  // Paint nodes as gradient-filled circles with IP label
-  const paintNode = useCallback((node, ctx, globalScale) => {
-    const r = 8;
-    const { ic, node_count } = node;
 
-    // Status color mapping
-    let color = "#64748b"; // Running (Gray)
-    if (ic > 0) {
-      color = ic >= node_count ? "#10b981" : "#6366f1"; // Converged (Emerald) : Gossiping (Indigo)
+  const paintNode = useCallback((node, ctx, globalScale) => {
+    const isKilled = killedNodes.has(node.id);
+    const isSelected = selectedNodeId === node.id;
+    const r = isSelected ? 10 : 8;
+    const { ic, node_count } = node;
+    const activeNodeCount = Math.max((node_count || 1) - killedNodes.size, 1);
+
+    let color = "#64748b";
+    if (isKilled) {
+      color = "#475569";
+    } else if (ic > 0) {
+      color = ic >= activeNodeCount ? "#10b981" : "#6366f1";
     }
 
-    // Outer glow
     ctx.beginPath();
     ctx.arc(node.x, node.y, r + 4, 0, 2 * Math.PI);
-    ctx.fillStyle = `${color}22`; // Very transparent version for glow
+    ctx.fillStyle = isKilled ? 'transparent' : `${color}22`;
     ctx.fill();
 
-    // Main circle
     ctx.beginPath();
     ctx.arc(node.x, node.y, r, 0, 2 * Math.PI);
-    ctx.fillStyle = color;
+    ctx.fillStyle = isKilled ? 'transparent' : color;
     ctx.fill();
-    ctx.strokeStyle = "rgba(255,255,255,0.3)";
-    ctx.lineWidth = 1;
+
+    ctx.strokeStyle = isKilled ? '#ef444466' : isSelected ? '#fff' : "rgba(255,255,255,0.3)";
+    ctx.lineWidth = isKilled ? 2 : isSelected ? 3 : 1;
+    if (isKilled) {
+      ctx.setLineDash([2, 1]);
+    } else {
+      ctx.setLineDash([]);
+    }
     ctx.stroke();
 
-    // Label
     const labelSize = Math.max(10 / globalScale, 3);
-    ctx.font = `${labelSize}px Inter, sans-serif`;
+    ctx.font = `${isKilled ? 'italic ' : ''}${labelSize}px "JetBrains Mono", Inter, sans-serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
-    ctx.fillStyle = "rgba(226, 232, 240, 0.9)";
-    ctx.fillText(node.label || node.id, node.x, node.y + r + 2);
-  }, []);
+    ctx.fillStyle = isKilled ? "#64748b" : isSelected ? "#fff" : "rgba(226, 232, 240, 0.9)";
+    ctx.fillText(node.label || node.id, node.x, node.y + r + 3);
+
+    if (isKilled) {
+      ctx.font = `${labelSize * 0.8}px monospace font-black`;
+      ctx.fillStyle = "#ef4444";
+      ctx.fillText("✕", node.x, node.y - r / 1.5);
+    }
+  }, [killedNodes, selectedNodeId]);
 
   const nodeCount = graphData.nodes.length;
   const linkCount = graphData.links.length;
 
   return (
     <div className="rounded-3xl bg-slate-800/40 border border-slate-700/50 backdrop-blur-md overflow-hidden shadow-2xl">
-      {/* Header */}
-      <div className="bg-gradient-to-r from-slate-800/80 to-slate-900/80 px-8 py-5 flex items-center justify-between border-b border-slate-700/50">
+      <div className="bg-gradient-to-r from-slate-900/80 to-slate-900 px-8 py-5 flex items-center justify-between border-b border-white/5">
         <div className="flex items-center gap-4">
-          <div className="relative">
-            <span className="absolute inset-0 rounded-full bg-emerald-500/20 blur-sm animate-pulse" />
-            <span className="relative block w-3 h-3 rounded-full bg-emerald-500" />
+          <div className="flex -space-x-1">
+            <div className="w-3 h-3 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
+            <div className="w-3 h-3 rounded-full bg-indigo-500/50" />
           </div>
-          <h2 className="text-slate-100 font-bold text-lg tracking-tight">
-            Live Network Topology
-          </h2>
+          <h2 className="text-white font-bold text-lg tracking-tight">Network Health Topology</h2>
         </div>
         <div className="flex items-center gap-6 text-slate-400 text-xs font-mono font-medium">
-          <div className="bg-slate-900/50 px-3 py-1.5 rounded-lg border border-slate-700/30">
-            {nodeCount} Nodes
+          <div className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/5">
+            <span className="text-slate-500 mr-1.5">Nodes:</span>{nodeCount}
           </div>
-          <div className="bg-slate-900/50 px-3 py-1.5 rounded-lg border border-slate-700/30">
-            {linkCount} Links
-          </div>
-          <div className="bg-slate-900/50 px-3 py-1.5 rounded-lg border border-slate-700/30">
-            {metricsLog.length} Data Points
+          <div className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/5">
+            <span className="text-slate-500 mr-1.5">Links:</span>{linkCount}
           </div>
         </div>
       </div>
 
-      {/* Graph canvas */}
-      <div className="relative" style={{ height: 500, background: "radial-gradient(circle at center, #1e293b 0%, #0f172a 100%)" }}>
+      <div className="relative" style={{ height: 500, background: "radial-gradient(circle at center, #0f172a 0%, #020617 100%)" }}>
         {nodeCount === 0 ? (
           <div className="absolute inset-0 flex items-center justify-center">
-            <div className="text-center">
-              <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-slate-900/50 border border-slate-700/50 flex items-center justify-center animate-pulse">
-                <svg className="w-8 h-8 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
-                </svg>
-              </div>
-              <p className="text-slate-200 text-sm font-semibold">Awaiting Live Metrics</p>
-              <p className="text-slate-500 text-xs mt-1 font-mono tracking-wide">Connect orchestrator to begin streaming</p>
-            </div>
+            <p className="text-slate-500 font-mono text-sm animate-pulse">Awaiting data stream from orchestrator...</p>
           </div>
         ) : (
           <ForceGraph2D
@@ -260,17 +412,17 @@ function LiveTopologyGraph({ graphData, metricsLog, nodeCountMetadata }) {
             nodeCanvasObject={paintNode}
             nodePointerAreaPaint={(node, color, ctx) => {
               ctx.beginPath();
-              ctx.arc(node.x, node.y, 10, 0, 2 * Math.PI);
+              ctx.arc(node.x, node.y, 12, 0, 2 * Math.PI);
               ctx.fillStyle = color;
               ctx.fill();
             }}
-            linkColor={() => "rgba(100, 116, 139, 0.25)"}
+            onNodeClick={(node) => onSelectNode(node.id)}
+            linkColor={(link) => killedNodes.has(link.source.id) || killedNodes.has(link.target.id) ? "rgba(239, 68, 68, 0.05)" : "rgba(56, 189, 248, 0.1)"}
             linkWidth={1.5}
             linkDirectionalParticles={2}
             linkDirectionalParticleWidth={2}
-            linkDirectionalParticleColor={() => "rgba(56, 189, 248, 0.4)"}
-            backgroundColor="transparent"
-            // width={undefined}
+            linkDirectionalParticleColor={() => "rgba(56, 189, 248, 0.3)"}
+            backgroundColor="#020617"
             height={500}
             cooldownTicks={100}
             d3AlphaDecay={0.01}
@@ -279,84 +431,79 @@ function LiveTopologyGraph({ graphData, metricsLog, nodeCountMetadata }) {
         )}
       </div>
 
-      {/* Structured Metrics Table */}
-      <div className="border-t border-slate-700/50 bg-slate-900/30">
-        <div className="px-8 py-4 border-b border-slate-700/20">
-          <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">
-            Real-Time Node Diagnostics
-          </h3>
+      <div className="border-t border-white/5 bg-slate-950/20">
+        <div className="px-8 py-3 bg-slate-900/40 border-b border-white/5">
+          <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">Live Diagnostic Feed</h3>
         </div>
-        <div className="max-h-[300px] overflow-y-auto overflow-x-hidden custom-scrollbar">
+        <div className="max-h-[350px] overflow-y-auto custom-scrollbar">
           <table className="w-full text-left border-collapse">
-            <thead className="sticky top-0 bg-slate-900/90 backdrop-blur-md text-[10px] text-slate-500 uppercase font-mono border-b border-slate-800">
+            <thead className="sticky top-0 bg-slate-900/95 backdrop-blur-md text-[10px] text-slate-500 uppercase font-mono border-b border-white/5">
               <tr>
-                <th className="px-8 py-3 font-medium">Node Endpoint</th>
-                <th className="px-4 py-3 font-medium">Round</th>
-                <th className="px-4 py-3 font-medium">ND</th>
-                <th className="px-4 py-3 font-medium">RM</th>
-                <th className="px-4 py-3 font-medium">Data</th>
-                <th className="px-4 py-3 font-medium">Convergence (IC)</th>
-                <th className="px-4 py-3 font-medium text-right pr-8">Status</th>
+                <th className="px-8 py-4 font-black">Node Endpoint</th>
+                <th className="px-4 py-4 font-black">Round</th>
+                <th className="px-4 py-4 font-black">ND</th>
+                <th className="px-4 py-4 font-black">Data</th>
+                <th className="px-4 py-4 font-black">Efficiency</th>
+                <th className="px-4 py-4 font-black">Convergence</th>
+                <th className="px-4 py-4 font-black text-right pr-8">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-800/40">
+            <tbody className="divide-y divide-white/5">
               {Object.values(graphData.nodes_info || {}).sort((a, b) => b.lastSeen - a.lastSeen).map((node) => {
-                const isConverged = node.ic >= node.node_count && node.ic > 0;
-                const isGossiping = node.ic > 0 && !isConverged;
+                const isKilled = killedNodes.has(node.id);
+                const activeNodeCount = Math.max((node.node_count || 1) - killedNodes.size, 1);
+                const isConverged = node.ic >= activeNodeCount && node.ic > 0;
+
+                const savings = ((node.filteredMessages || 0) / (node.totalMessages || 1)) * 100;
 
                 return (
-                  <tr key={node.id} className="hover:bg-slate-800/30 transition-colors duration-150">
-                    <td className="px-8 py-3.5 whitespace-nowrap">
+                  <tr
+                    key={node.id}
+                    className={`group transition-all hover:bg-white/5 cursor-pointer ${isKilled ? 'opacity-40 grayscale' : ''}`}
+                    onClick={() => onSelectNode(node.id)}
+                  >
+                    <td className="px-8 py-4 whitespace-nowrap">
                       <div className="flex items-center gap-3">
-                        <div className={`w-2 h-2 rounded-full ${isConverged ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : isGossiping ? 'bg-indigo-500 animate-pulse' : 'bg-slate-600'}`} />
-                        <span className="text-slate-300 font-mono text-xs">{node.id}</span>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3.5 font-mono text-[10px] text-slate-400">
-                      {node.round}
-                    </td>
-                    <td className="px-4 py-3.5 font-mono text-[10px] text-slate-400">
-                      {node.nd}
-                    </td>
-                    <td className="px-4 py-3.5 font-mono text-[10px] text-slate-400">
-                      {node.rm}
-                    </td>
-                    <td className="px-4 py-3.5 font-mono text-[10px] text-slate-400">
-                      {node.bytes_of_data < 1024 ? `${node.bytes_of_data}B` : `${(node.bytes_of_data / 1024).toFixed(1)}KB`}
-                    </td>
-                    <td className="px-4 py-3.5">
-                      <div className="flex items-center gap-3">
-                        <div className="w-16 h-1 rounded-full bg-slate-800 overflow-hidden">
-                          <div
-                            className={`h-full transition-all duration-500 ${isConverged ? 'bg-emerald-500' : 'bg-indigo-500'}`}
-                            style={{ width: `${(node.ic / (node.node_count || 1)) * 100}%` }}
-                          />
+                        <div className={`w-2 h-2 rounded-full ${isKilled ? 'bg-red-500 flex items-center justify-center text-[6px] text-white' : isConverged ? 'bg-emerald-500' : 'bg-indigo-500'}`}>
+                          {isKilled && "✕"}
                         </div>
-                        <span className="text-slate-400 font-mono text-[10px]">
-                          {node.ic}/{node.node_count || '?'}
-                        </span>
+                        <span className="text-slate-200 font-mono text-xs group-hover:text-white">{node.id}</span>
                       </div>
                     </td>
-                    <td className="px-4 py-3.5 text-right pr-8">
-                      <span className={`
-                        text-[9px] font-bold px-2 py-1 rounded uppercase tracking-tighter
-                        ${isConverged ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20' :
-                          isGossiping ? 'bg-indigo-500/10 text-indigo-500 border border-indigo-500/20' :
-                            'bg-slate-700/30 text-slate-500 border border-slate-700/50'}
-                      `}>
-                        {isConverged ? 'Converged' : isGossiping ? 'Gossiping' : 'Running'}
-                      </span>
+                    <td className="px-4 py-4 font-mono text-xs text-slate-400">{node.round}</td>
+                    <td className="px-4 py-4 font-mono text-xs text-slate-400">{node.nd}</td>
+                    <td className="px-4 py-4 font-mono text-xs text-slate-400">{(node.bytes_of_data / 1024).toFixed(1)} KB</td>
+                    <td className="px-4 py-4">
+                      {node.strikes > 0 ? (
+                        <span className={`text-[10px] font-mono font-bold px-2 py-1 rounded ${node.strikes >= 3 ? 'text-red-500 bg-red-500/10' : 'text-amber-500 bg-amber-500/10 animate-pulse'}`}>
+                          {node.strikes >= 3 ? 'AMPUTATED' : `STRIKES: ${node.strikes}/3`}
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-mono font-bold text-emerald-500/80">HEALTHY</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-12 h-1 bg-slate-800 rounded-full overflow-hidden">
+                          <div className={`h-full ${isConverged ? 'bg-emerald-500' : 'bg-indigo-500'}`} style={{ width: `${(node.ic / activeNodeCount) * 100}%` }} />
+                        </div>
+                        <span className="text-[10px] text-slate-500 font-mono">{node.ic}/{activeNodeCount}</span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-4 text-right pr-8" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        onClick={() => onKillNode(node.id)}
+                        disabled={isKilled}
+                        className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${isKilled ? 'bg-red-500/10 text-red-700 border border-red-900/20' : 'bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/30 hover:text-red-100 hover:border-red-500/50 active:scale-95'}`}
+                      >
+                        {isKilled ? 'Terminated' : 'Kill Node'}
+                      </button>
                     </td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
-          {Object.keys(graphData.nodes_info || {}).length === 0 && (
-            <div className="py-12 text-center text-slate-600 font-mono text-[10px] uppercase tracking-widest">
-              Establishing node stream...
-            </div>
-          )}
         </div>
       </div>
     </div>
@@ -374,364 +521,331 @@ export default function App() {
   const [booting, setBooting] = useState(false);
   const [toast, setToast] = useState(null);
 
-  // Live metrics state
   const [graphData, setGraphData] = useState({ nodes: [], links: [], nodes_info: {} });
   const [metricsLog, setMetricsLog] = useState([]);
-  const nodesMapRef = useRef(new Map());   // nodeId -> node object
-  const linksSetRef = useRef(new Set());   // "srcId->tgtId" dedup keys
+  const nodesMapRef = useRef(new Map());
+  const linksSetRef = useRef(new Set());
+  const strikesMapRef = useRef(new Map());
 
-  // ---- Socket.io: connect and listen for live metrics ----------------------
+  // Global VoI Stats
+  const [globalTotalMessages, setGlobalTotalMessages] = useState(0);
+  const [globalFilteredMessages, setGlobalFilteredMessages] = useState(0);
+
+  const [selectedNodeId, setSelectedNodeId] = useState(null);
+  const [killedNodes, setKilledNodes] = useState(new Set());
+
+  const globalSavingsPercent = useMemo(() => {
+    if (globalTotalMessages === 0) return 0;
+    return (globalFilteredMessages / globalTotalMessages) * 100;
+  }, [globalTotalMessages, globalFilteredMessages]);
+
+  const handleKillNode = useCallback(async (nodeId) => {
+    const ip = ipOnly(nodeId);
+    const port = nodeId.includes(":") ? nodeId.split(":")[1] : "";
+    try {
+      const res = await fetch(`${API_BASE}/kill-node/${ip}/${port}`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+
+      setKilledNodes((prev) => new Set([...prev, nodeId]));
+
+      // Mark it dead in the internal state immediately so graph renders it
+      const map = nodesMapRef.current;
+      if (map.has(nodeId)) {
+        map.get(nodeId).isDead = true;
+      }
+
+      setToast({ message: `⚡ Node ${ip} terminated. Gossip peers will detect failure within 3 rounds.`, type: "success" });
+    } catch (err) {
+      setToast({ message: `${err.message}`, type: "error" });
+    }
+  }, []);
+
   useEffect(() => {
-    const socket = io(SOCKET_URL, { transports: ["websocket", "polling"] });
+    const socket = io(SOCKET_URL, { transports: ["websocket"] });
 
-    // Handle experiment initialization
-    socket.on("run_started", (initPayload) => {
+    socket.on("run_started", (p) => {
+      nodesMapRef.current = new Map();
+      linksSetRef.current = new Set();
+      strikesMapRef.current = new Map();
+      setKilledNodes(new Set());
+      setGlobalTotalMessages(0);
+      setGlobalFilteredMessages(0);
+      setSelectedNodeId(null);
+
       const now = Date.now();
-      const initialNodesMap = new Map();
-      const nodeCount = initPayload.node_count || 1;
-
-      // Populate nodes as "Running"
-      initPayload.nodes.forEach((node) => {
-        const id = `${node.ip}:${node.port}`;
-        initialNodesMap.set(id, {
-          id,
-          label: id,
-          ic: 0,
-          node_count: nodeCount,
-          round: 0,
-          nd: 0,
-          rm: 0,
-          bytes_of_data: 0,
-          lastSeen: now,
-          // Initial fuzzy position near center to prevent (0,0) sticking
-          x: (Math.random() - 0.5) * 50,
-          y: (Math.random() - 0.5) * 50
+      const nodeCount = p.node_count || 1;
+      p.nodes.forEach(n => {
+        const id = `${n.ip}:${n.port}`;
+        nodesMapRef.current.set(id, {
+          id, label: id, ic: 0, node_count: nodeCount, round: 0, nd: 0, rm: 0,
+          bytes_of_data: 0, lastSeen: now, x: (Math.random() - 0.5) * 50, y: (Math.random() - 0.5) * 50,
+          totalMessages: 0, filteredMessages: 0, appState: {}, isDead: false
         });
       });
-
-      nodesMapRef.current = initialNodesMap;
-      linksSetRef.current = new Set();
-      setMetricsLog([]);
       setGraphData({
-        nodes: Array.from(initialNodesMap.values()),
+        nodes: Array.from(nodesMapRef.current.values()),
         links: [],
-        nodes_info: Object.fromEntries(initialNodesMap)
+        nodes_info: Object.fromEntries(nodesMapRef.current)
       });
     });
 
-    socket.on("new_metric", (payload) => {
-      const senderKey = `${payload.ip}:${payload.port}`;
+    socket.on("new_metric", (p) => {
+      const senderKey = `${p.ip}:${p.port}`;
       const now = Date.now();
-
-      setMetricsLog((prev) => {
-        const next = [...prev, payload];
-        return next.length > 50 ? next.slice(-50) : next;
-      });
-
       const nodesMap = nodesMapRef.current;
       const linksSet = linksSetRef.current;
 
-      // Update or create reporter node
-      let senderNode = nodesMap.get(senderKey);
-      if (!senderNode) {
-        senderNode = {
-          id: senderKey,
-          label: senderKey,
-          x: (Math.random() - 0.5) * 50,
-          y: (Math.random() - 0.5) * 50
-        };
-        nodesMap.set(senderKey, senderNode);
-      }
-
-      // Update data properties (IN PLACE to preserve physics x,y)
-      Object.assign(senderNode, {
-        ic: payload.ic || 0,
-        node_count: payload.node_count || 1,
-        round: payload.round || 0,
-        nd: payload.nd || 0,
-        rm: payload.rm || 0,
-        bytes_of_data: payload.bytes_of_data || 0,
-        lastSeen: now
+      setMetricsLog(prev => {
+        const next = [...prev, p];
+        return next.length > 50 ? next.slice(-50) : next;
       });
 
-      const peers = payload.data_stored_in_node || [];
-      peers.forEach((peerKey) => {
-        if (peerKey === senderKey) return;
+      let node = nodesMap.get(senderKey);
+      if (!node) {
+        node = { id: senderKey, label: senderKey, x: (Math.random() - 0.5) * 50, y: (Math.random() - 0.5) * 50, isDead: false };
+        nodesMap.set(senderKey, node);
+      }
+
+      // Track VoI Savings Logic
+      let isMetricsFiltered = false;
+      const fields = ['cpu', 'memory', 'network', 'storage'];
+      const fieldStats = {};
+
+      fields.forEach(f => {
+        const val = p[f];
+        if (val === "not_updated") {
+          isMetricsFiltered = true;
+          fieldStats[f] = node.appState?.[f] && node.appState[f] !== "not_updated" ? node.appState[f] : "not_updated";
+        } else if (val !== undefined) {
+          fieldStats[f] = val;
+        }
+      });
+
+      setGlobalTotalMessages(v => v + 1);
+      if (isMetricsFiltered) setGlobalFilteredMessages(v => v + 1);
+
+      Object.assign(node, {
+        ic: p.ic || 0,
+        node_count: p.node_count || 1,
+        active_target: p.active_target || p.node_count || 1,
+        round: p.round || 0,
+        nd: p.nd || 0,
+        rm: p.rm || 0,
+        bytes_of_data: p.bytes_of_data || 0,
+        lastSeen: now,
+        totalMessages: (node.totalMessages || 0) + 1,
+        filteredMessages: (node.filteredMessages || 0) + (isMetricsFiltered ? 1 : 0),
+        appState: {
+          ...(node.appState || {}),
+          ...fieldStats,
+          cpu: p.cpu === "not_updated" ? (node.appState?.cpu ?? "not_updated") : p.cpu,
+          memory: p.memory === "not_updated" ? (node.appState?.memory ?? "not_updated") : p.memory,
+          network: p.network === "not_updated" ? (node.appState?.network ?? "not_updated") : p.network,
+          storage: p.storage === "not_updated" ? (node.appState?.storage ?? "not_updated") : p.storage,
+          _isCpuFiltered: p.cpu === "not_updated",
+          _isMemoryFiltered: p.memory === "not_updated",
+          _isNetworkFiltered: p.network === "not_updated",
+          _isStorageFiltered: p.storage === "not_updated"
+        }
+      });
+
+      const peers = p.data_stored_in_node || [];
+      const peerStatus = p.peer_status || {};
+
+      peers.forEach(peerKey => {
+        if (typeof peerKey !== "string" || peerKey === senderKey) return;
+
+        let targetDead = false;
+        if (peerStatus[peerKey]) {
+          const stats = peerStatus[peerKey];
+
+          // Track the highest strike count globally across all nodes
+          if (stats.failCount > 0) {
+            const currentStrikes = strikesMapRef.current.get(peerKey) || 0;
+            strikesMapRef.current.set(peerKey, Math.max(currentStrikes, stats.failCount));
+          }
+
+          if (stats.failCount > 0) {
+            if (!node.appState._failCounts) node.appState._failCounts = {};
+            node.appState._failCounts[peerKey] = stats.failCount;
+          }
+          if (stats.isAlive === false || stats.failCount >= 3) {
+            targetDead = true;
+          }
+        }
 
         if (!nodesMap.has(peerKey)) {
           nodesMap.set(peerKey, {
-            id: peerKey,
-            label: peerKey,
-            ic: 0,
-            node_count: payload.node_count || 1,
-            round: 0,
-            nd: 0,
-            rm: 0,
-            bytes_of_data: 0,
-            lastSeen: now,
-            x: (Math.random() - 0.5) * 100,
-            y: (Math.random() - 0.5) * 100
+            id: peerKey, label: peerKey, ic: 0, node_count: p.node_count || 1,
+            round: 0, nd: 0, rm: 0, bytes_of_data: 0, lastSeen: now,
+            x: (Math.random() - 0.5) * 100, y: (Math.random() - 0.5) * 100, appState: {}, isDead: false
           });
         }
 
         const edgeA = `${senderKey}->${peerKey}`;
         const edgeB = `${peerKey}->${senderKey}`;
-        if (!linksSet.has(edgeA) && !linksSet.has(edgeB)) {
-          linksSet.add(edgeA);
+
+        if (targetDead) {
+          linksSet.delete(edgeA);
+          linksSet.delete(edgeB);
+        } else {
+          if (!linksSet.has(edgeA) && !linksSet.has(edgeB)) linksSet.add(edgeA);
         }
       });
 
-      const nodes = Array.from(nodesMap.values());
-      const links = Array.from(linksSet).map((key) => {
-        const [source, target] = key.split("->");
-        return { source, target };
+      // Pass strikes to UI and kill nodes that reach 3 strikes
+      Array.from(nodesMap.values()).forEach(n => {
+        n.strikes = strikesMapRef.current.get(n.id) || 0;
+        if (n.strikes >= 3) setKilledNodes(prev => new Set(prev).add(n.id));
       });
-      const nodes_info = Object.fromEntries(nodesMap);
 
-      setGraphData({ nodes, links, nodes_info });
+      // AGGRESSIVELY sever any link touching a node with 3+ strikes OR one that we manually killed
+      const validLinks = Array.from(linksSet).map(k => {
+        const [source, target] = k.split('->');
+        return { source, target };
+      }).filter(link => {
+        const sStrikes = strikesMapRef.current.get(link.source) || 0;
+        const tStrikes = strikesMapRef.current.get(link.target) || 0;
+        // severed if either node is marked as killed OR has too many strikes
+        const isSourceKilled = killedNodes.has(link.source) || (nodesMap.get(link.source)?.isDead);
+        const isTargetKilled = killedNodes.has(link.target) || (nodesMap.get(link.target)?.isDead);
+        
+        return !isSourceKilled && !isTargetKilled && sStrikes < 3 && tStrikes < 3;
+      });
+
+      setGraphData({
+        nodes: Array.from(nodesMap.values()),
+        links: validLinks,
+        nodes_info: Object.fromEntries(nodesMap)
+      });
     });
 
-    return () => {
-      socket.disconnect();
-    };
+    return () => socket.disconnect();
   }, []);
 
-  // ---- Load config on mount ------------------------------------------------
   useEffect(() => {
     (async () => {
       try {
         const res = await fetch(`${API_BASE}/config`);
-        if (!res.ok) throw new Error(`Server returned ${res.status}`);
         const data = await res.json();
         setConfig(data);
-      } catch (err) {
-        setFetchError(err.message);
-      } finally {
-        setLoading(false);
-      }
+      } catch (err) { setFetchError(err.message); }
+      finally { setLoading(false); }
     })();
   }, []);
 
-  // ---- Field change handler ------------------------------------------------
-  const handleChange = useCallback((section, key, value) => {
-    setConfig((prev) => ({
-      ...prev,
-      [section]: {
-        ...prev[section],
-        [key]: value,
-      },
-    }));
-  }, []);
+  const handleChange = (s, k, v) => setConfig(prev => ({ ...prev, [s]: { ...prev[s], [k]: v } }));
 
-  // ---- Save config ---------------------------------------------------------
   const handleSave = async () => {
     setSaving(true);
     try {
       const res = await fetch(`${API_BASE}/config`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(config),
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(config)
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Unknown error");
-      setToast({ message: "Configuration saved successfully.", type: "success" });
-    } catch (err) {
-      setToast({ message: `Save failed: ${err.message}`, type: "error" });
-    } finally {
-      setSaving(false);
-    }
+      if (!res.ok) throw new Error("Save error");
+      setToast({ message: "Configuration cached.", type: "success" });
+    } catch (err) { setToast({ message: err.message, type: "error" }); }
+    finally { setSaving(false); }
   };
 
-  // ---- Start experiment ----------------------------------------------------
   const handleStart = async () => {
     setBooting(true);
     try {
       const res = await fetch(`${API_BASE}/start`, { method: "POST" });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Orchestrator error");
-      setToast({ message: "Live network booted successfully!", type: "success" });
-    } catch (err) {
-      setToast({ message: `Boot failed: ${err.message}`, type: "error" });
-    } finally {
-      setBooting(false);
-    }
+      if (!res.ok) throw new Error("Orchestrator unreachable");
+      setToast({ message: "Live experiment launched.", type: "success" });
+    } catch (err) { setToast({ message: err.message, type: "error" }); }
+    finally { setBooting(false); }
   };
 
-  // ---- Render loading / error states --------------------------------------
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
-        <div className="flex flex-col items-center gap-4">
-          <div className="w-10 h-10 border-4 border-violet-500 border-t-transparent rounded-full animate-spin" />
-          <p className="text-slate-400 text-sm font-medium tracking-wide">
-            Loading configuration…
-          </p>
-        </div>
-      </div>
-    );
-  }
+  if (loading) return <div className="min-h-screen bg-slate-950 flex items-center justify-center font-mono text-slate-500">Initializing Control Center...</div>;
 
-  if (fetchError) {
-    return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
-        <div className="bg-red-900/30 border border-red-700/50 rounded-2xl p-8 max-w-md text-center">
-          <p className="text-red-400 font-semibold text-lg mb-2">Failed to load configuration</p>
-          <p className="text-red-300/70 text-sm font-mono">{fetchError}</p>
-          <p className="text-slate-500 text-xs mt-4">
-            Is the API server running on <span className="text-slate-300 font-mono">localhost:5000</span>?
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  // ---- Main render ---------------------------------------------------------
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 selection:bg-violet-500/30">
-      {/* Background radial glow */}
-      <div className="fixed inset-0 pointer-events-none">
-        <div className="absolute -top-40 -left-40 w-[600px] h-[600px] bg-violet-600/10 rounded-full blur-3xl" />
-        <div className="absolute -bottom-40 -right-40 w-[600px] h-[600px] bg-cyan-600/10 rounded-full blur-3xl" />
+    <div className="min-h-screen bg-[#020617] text-slate-100 selection:bg-violet-500/30 overflow-x-hidden">
+      {/* Background Decor */}
+      <div className="fixed inset-0 pointer-events-none opacity-30 overflow-hidden">
+        <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-indigo-600/20 rounded-full blur-[120px] -translate-y-1/2 translate-x-1/2" />
+        <div className="absolute bottom-0 left-0 w-[500px] h-[500px] bg-emerald-600/10 rounded-full blur-[120px] translate-y-1/2 -translate-x-1/2" />
       </div>
 
-      <div className="relative max-w-5xl mx-auto px-6 py-12">
-        {/* --------------------------------------------------------------- */}
-        {/* Header */}
-        {/* --------------------------------------------------------------- */}
-        <header className="mb-12">
-          <div className="flex items-center gap-3 mb-1">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-violet-500/30">
-              <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18" />
-              </svg>
+      <div className="relative max-w-6xl mx-auto px-8 py-12 flex flex-col min-h-[calc(100vh-6rem)]">
+        {/* Header Section */}
+        <header className="mb-12 flex flex-col md:flex-row md:items-end justify-between gap-6 shrink-0">
+          <div>
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-indigo-600 to-violet-600 flex items-center justify-center shadow-xl shadow-indigo-500/20">
+                <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+              </div>
+              <h1 className="text-3xl font-black tracking-tighter text-white">PRIOMON <span className="text-indigo-500">v1.2</span></h1>
             </div>
-            <span className="text-xs font-semibold tracking-[0.2em] text-violet-400 uppercase">
-              PrioMon
-            </span>
+            <p className="text-slate-500 max-w-md text-sm leading-relaxed font-medium">Distributed Monitoring Control Center with Value-of-Information (VoI) prioritized gossip.</p>
           </div>
 
-          <h1 className="text-4xl font-bold bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent mt-3">
-            Control Center
-          </h1>
-          <p className="text-slate-500 text-sm mt-1.5">
-            Configure and launch the distributed monitoring network.
-          </p>
+          <div className="flex flex-wrap items-center gap-4">
+            <GlobalEfficiencyBadge savingsPercent={globalSavingsPercent} />
+            <div className="bg-slate-900 px-4 py-2 rounded-xl border border-white/5 flex items-center gap-3">
+              <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest leading-none">Stream Status: <span className="text-slate-100">Active</span></span>
+            </div>
+          </div>
         </header>
 
-        {/* --------------------------------------------------------------- */}
-        {/* Config section cards — dynamically rendered */}
-        {/* --------------------------------------------------------------- */}
-        <section className="space-y-6 mb-10">
-          {Object.entries(config).map(([sectionKey, sectionData]) => {
-            if (typeof sectionData !== "object" || sectionData === null) return null;
-            return (
-              <SectionCard
-                key={sectionKey}
-                sectionKey={sectionKey}
-                sectionData={sectionData}
-                onChange={handleChange}
-              />
-            );
-          })}
-        </section>
-
-        {/* --------------------------------------------------------------- */}
-        {/* Action bar */}
-        {/* --------------------------------------------------------------- */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4 mb-10">
-          {/* Save button */}
+        {/* Experiment Actions */}
+        <div className="flex flex-col sm:flex-row items-center gap-4 mb-12 shrink-0">
           <button
-            id="btn-save-config"
             onClick={handleSave}
             disabled={saving || booting}
-            className="
-              flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl
-              bg-slate-700 hover:bg-slate-600 border border-slate-600 hover:border-slate-500
-              text-slate-100 font-semibold text-sm
-              transition-all duration-200
-              disabled:opacity-50 disabled:cursor-not-allowed
-            "
+            className="w-full sm:w-auto px-8 py-4 rounded-2xl bg-slate-900 border border-white/10 hover:bg-slate-800 text-white font-bold text-sm transition-all shadow-lg active:scale-95 disabled:opacity-50"
           >
-            {saving ? (
-              <>
-                <Spinner />
-                Saving…
-              </>
-            ) : (
-              <>
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
-                </svg>
-                Save Configuration
-              </>
-            )}
+            {saving ? 'Syncing...' : 'Save Config'}
           </button>
-
-          {/* Start experiment button */}
           <button
-            id="btn-start-experiment"
             onClick={handleStart}
-            disabled={booting || saving}
-            className="
-              relative flex-1 flex items-center justify-center gap-3
-              px-10 py-4 rounded-xl font-bold text-base tracking-wide
-              bg-gradient-to-r from-violet-600 to-indigo-600
-              hover:from-violet-500 hover:to-indigo-500
-              text-white shadow-xl shadow-violet-500/30
-              hover:shadow-violet-500/50 hover:scale-[1.01]
-              active:scale-[0.99]
-              transition-all duration-200
-              disabled:opacity-60 disabled:cursor-not-allowed disabled:scale-100
-              disabled:shadow-violet-500/10
-            "
+            disabled={booting}
+            className="flex-1 px-8 py-4 rounded-2xl bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white font-black text-sm tracking-wider shadow-2xl shadow-indigo-600/30 transition-all active:scale-95 disabled:opacity-50"
           >
-            {!booting && (
-              <span className="absolute inset-0 rounded-xl ring-1 ring-violet-400/30 animate-pulse" />
-            )}
-
-            {booting ? (
-              <>
-                <Spinner />
-                Booting Network…
-              </>
-            ) : (
-              <>
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M5.636 18.364a9 9 0 010-12.728m12.728 0a9 9 0 010 12.728M8.464 15.536a5 5 0 010-7.072m7.072 0a5 5 0 010 7.072M12 12h.01" />
-                </svg>
-                Start Experiment
-              </>
-            )}
+            {booting ? 'Provisioning...' : 'BOOT DISTRIBUTED NETWORK'}
           </button>
         </div>
 
-        {/* --------------------------------------------------------------- */}
-        {/* Live Network Topology Graph */}
-        {/* --------------------------------------------------------------- */}
-        <section className="mb-10">
-          <LiveTopologyGraph graphData={graphData} metricsLog={metricsLog} />
+        {/* Config Summary - 3 Columns Editable */}
+        <section className="space-y-6 mb-12 shrink-0">
+          {Object.entries(config).map(([sk, sd]) => (
+            <SectionCard key={sk} sectionKey={sk} sectionData={sd} onChange={handleChange} />
+          ))}
         </section>
 
-        {/* --------------------------------------------------------------- */}
+        {/* Network & Diagnostics */}
+        <section className="relative flex-1">
+          <LiveTopologyGraph
+            graphData={graphData}
+            metricsLog={metricsLog}
+            onSelectNode={setSelectedNodeId}
+            killedNodes={killedNodes}
+            onKillNode={handleKillNode}
+            selectedNodeId={selectedNodeId}
+          />
+        </section>
+
+        {/* Node Inspector Sidebar */}
+        <NodeInspector
+          nodeId={selectedNodeId}
+          nodesInfo={graphData.nodes_info}
+          onClose={() => setSelectedNodeId(null)}
+          totalGlobalMessages={globalTotalMessages}
+          totalGlobalFiltered={globalFilteredMessages}
+          killedNodes={killedNodes}
+        />
+
         {/* Footer */}
-        {/* --------------------------------------------------------------- */}
-        <footer className="mt-16 text-center text-slate-700 text-xs">
-          PrioMon Control Center · API on{" "}
-          <span className="font-mono text-slate-600">:5000</span> · Orchestrator on{" "}
-          <span className="font-mono text-slate-600">:4000</span>
+        <footer className="mt-20 text-center shrink-0">
+          <p className="text-[10px] font-mono text-slate-700 uppercase tracking-[0.4em]">EdgeWatch Project &copy; 2026 · PrioMon Research</p>
         </footer>
       </div>
 
-      {/* ----------------------------------------------------------------- */}
-      {/* Toast */}
-      {/* ----------------------------------------------------------------- */}
-      {toast && (
-        <Toast
-          message={toast.message}
-          type={toast.type}
-          onDismiss={() => setToast(null)}
-        />
-      )}
+      {toast && <Toast message={toast.message} type={toast.type} onDismiss={() => setToast(null)} />}
     </div>
   );
 }

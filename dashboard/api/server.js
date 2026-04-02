@@ -5,6 +5,7 @@ const path = require("path");
 const ini = require("ini");
 const http = require("http");
 const { Server } = require("socket.io");
+const { exec } = require("child_process");
 
 const app = express();
 const PORT = 5000;
@@ -75,7 +76,11 @@ app.post("/api/config", (req, res) => {
 app.post("/api/start", async (req, res) => {
   try {
     const orchestratorUrl = "http://localhost:4000/start";
-    const response = await fetch(orchestratorUrl);
+    const response = await fetch(orchestratorUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req.body),
+    });
 
     // Surface the orchestrator's own status code if it signals an error
     if (!response.ok) {
@@ -123,6 +128,52 @@ app.post("/api/live-run-start", (req, res) => {
   io.emit("run_started", payload);
   res.json({ success: true });
 });
+
+// ---------------------------------------------------------------------------
+// POST /api/kill-node/:ip/:port
+// Chaos Engine: soft-kill a live node via its Flask /terminate endpoint.
+// This is instant (no Docker daemon overhead), and triggers the in-network
+// 3-strike failure detection so the graph visually disconnects the node.
+// ---------------------------------------------------------------------------
+app.post("/api/kill-node/:ip/:port", async (req, res) => {
+  const targetIp   = req.params.ip;
+  const targetPort = req.params.port;
+
+  if (!/^(\d{1,3}\.){3}\d{1,3}$/.test(targetIp)) {
+    return res.status(400).json({ error: "Invalid IP address format." });
+  }
+
+  const nodeUrl = `http://127.0.0.1:${targetPort}/terminate`;
+  console.log(`[Chaos Engine] Soft-killing ${targetIp}:${targetPort} via ${nodeUrl}`);
+
+  try {
+    // Hit the /terminate endpoint directly inside the container
+    const response = await fetch(nodeUrl, { method: "POST", signal: AbortSignal.timeout(4000) });
+    const body     = await response.text();
+
+    if (body !== "TERMINATED" && !response.ok) {
+      throw new Error(`Node returned unexpected status ${response.status}: ${body}`);
+    }
+
+    // Notify the Python orchestrator to immediately lower the convergence target
+    try {
+      await fetch("http://localhost:4000/notify_node_killed", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ip: targetIp, port: targetPort }),
+        signal: AbortSignal.timeout(2000)
+      });
+    } catch (_) { /* orchestrator notification is best-effort */ }
+
+    console.log(`[Chaos Engine] Node ${targetIp}:${targetPort} terminated successfully.`);
+    res.json({ success: true, ip: targetIp, port: targetPort });
+  } catch (err) {
+    console.error(`[Chaos Engine] Soft-kill failed for ${targetIp}:${targetPort}:`, err.message);
+    res.status(500).json({ error: `Chaos Engine Error: Could not reach node at ${targetIp}:${targetPort}. Is the experiment running?`, details: err.message });
+  }
+});
+
+
 
 // ---------------------------------------------------------------------------
 // Start server (use server.listen, NOT app.listen, so socket.io binds too)

@@ -31,19 +31,54 @@ METRIC_DELTAS = {
 
 # Track last values to calculate deltas
 last_metric_values = {}
+# Track state for rate calculations
+last_network_bytes = 0
+last_network_time = time.time()
 # Track when each metric was last sent
 last_metric_sent_round = {}
+# Persistent process handle for efficient monitoring
+node_process = psutil.Process()
 
 def get_new_data():
+    global last_network_bytes, last_network_time
     node = Node.instance()
-    network = psutil.net_io_counters().bytes_recv + psutil.net_io_counters().bytes_sent
+    
+    # Calculate Bandwidth (Mbps)
+    current_network_bytes = psutil.net_io_counters().bytes_recv + psutil.net_io_counters().bytes_sent
+    current_time = time.time()
+    
+    if last_network_bytes == 0:
+        # First call, initialize values and return 0
+        last_network_bytes = current_network_bytes
+        last_network_time = current_time
+        bandwidth_mbps = 0.0
+    else:
+        delta_bytes = current_network_bytes - last_network_bytes
+        delta_time = current_time - last_network_time
+        
+        # Avoid division by zero
+        if delta_time > 0:
+            bandwidth_mbps = (delta_bytes * 8) / (delta_time * 1024 * 1024)
+        else:
+            bandwidth_mbps = 0.0
+            
+        last_network_bytes = current_network_bytes
+        last_network_time = current_time
+    
+    # Calculate Storage (Usage %)
+    storage_percent = psutil.disk_usage('/').percent
+    
+    # Get current node-specific resource usage
+    # (Using non-blocking cpu_percent() to avoid hanging the gossip thread)
+    cpu_usage = node_process.cpu_percent(interval=None)
+    memory_usage = node_process.memory_percent()
     
     # Get current metric values
     current_metrics = {
-        "cpu": psutil.cpu_percent(),
-        "memory": psutil.virtual_memory().percent,
-        "network": network,
-        "storage": psutil.disk_usage('/').free
+        "cpu": cpu_usage,
+        "memory": memory_usage,
+        "network": bandwidth_mbps,
+        "storage": storage_percent
     }
     
     # Determine which metrics to send based on priority and delta
