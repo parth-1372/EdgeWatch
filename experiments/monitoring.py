@@ -35,20 +35,27 @@ experiment = None
 run_lock = threading.Lock()
 
 def execute_queries_from_queue():
-    # keep the connection open for the lifetime of the thread for speed
+    """Dedicated SQLite writer thread — drains the query_queue in batches.
+
+    Batching (commit every N items or when the queue drains temporarily) amortises
+    the fsync cost of WAL-mode writes without losing data.  On failure the
+    transaction is rolled back, the cursor is recreated (a stale cursor after
+    rollback can produce silent failures in SQLite's Python driver), and the
+    failed batch is discarded — individual items are marked task_done so
+    join() callers are never left hanging.
+    """
     conn = sqlite3.connect('priomonDB.db', check_same_thread=False)
     cursor = conn.cursor()
-    
-    # how many queries to bundle before one disk sync
+
     batch_size = 50
     pending_items = []
-    
+
     while True:
         query_data = None
         try:
             query_data = experiment.query_queue.get()
             if query_data is None:
-                # final flush before exiting
+                # Poison pill — flush and exit
                 if pending_items:
                     conn.commit()
                     for _ in pending_items:
@@ -58,8 +65,8 @@ def execute_queries_from_queue():
             query, parameters = query_data
             cursor.execute(query, parameters)
             pending_items.append(query_data)
-            
-            # commit if batch is full or if the queue is temporarily empty 
+
+            # Commit when batch is full or queue is temporarily empty
             if len(pending_items) >= batch_size or experiment.query_queue.empty():
                 conn.commit()
                 for _ in pending_items:
@@ -67,23 +74,32 @@ def execute_queries_from_queue():
                 pending_items = []
 
         except Exception as e:
-            # if anything fails, we gotta rollback to prevent a stuck transaction
             print("Error db batch: {}".format(e))
             print("trace: {}".format(traceback.format_exc()))
             try:
                 conn.rollback()
-            except:
+            except Exception:
                 pass
-            
-            # cleanup: mark everything in the failed batch as done so the queue doesn't hang
+
+            # Recreate the cursor — a cursor after rollback can be in an
+            # undefined state in SQLite's Python driver, leading to silent
+            # failures on the very next execute() call.
+            try:
+                cursor = conn.cursor()
+            except Exception:
+                pass
+
+            # Mark every pending item (already dequeued) as done so join()
+            # callers are never left hanging.
             for _ in pending_items:
                 experiment.query_queue.task_done()
             pending_items = []
-            
-            # if the current item is also problematic, mark it too
+
+            # query_data was dequeued with .get() but not yet added to
+            # pending_items — mark it done only if that's the case.
             if query_data is not None:
                 experiment.query_queue.task_done()
-            
+
             continue
 
 def get_target_count(node_count, target_count_range):
