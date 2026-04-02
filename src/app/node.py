@@ -29,56 +29,56 @@ METRIC_DELTAS = {
     "storage": 10.0  # 10% change in storage
 }
 
+# Track last values to calculate deltas
+last_metric_values = {}
+# Track state for rate calculations
+last_network_bytes = 0
+last_network_time = time.time()
+# Track when each metric was last sent
+last_metric_sent_round = {}
+# Persistent process handle for efficient monitoring
+node_process = psutil.Process()
 
 def get_new_data():
-    """Collect current resource metrics and apply VoI priority filtering.
-    
-    Returns a gossip-ready data dict. Metrics that don't pass the priority/delta
-    filter are replaced with the sentinel string "not_updated" so peers know to
-    keep their cached value instead of overwriting with a stale one.
-    """
+    global last_network_bytes, last_network_time
     node = Node.instance()
-
-    # ---------------------------------------------------------------------------
-    # Calculate Bandwidth (Mbps) — using instance state so resets survive
-    # a /reset_node or /start_node call cleanly.
-    # ---------------------------------------------------------------------------
-    current_network_bytes = (
-        psutil.net_io_counters().bytes_recv
-        + psutil.net_io_counters().bytes_sent
-    )
+    
+    # Calculate Bandwidth (Mbps)
+    current_network_bytes = psutil.net_io_counters().bytes_recv + psutil.net_io_counters().bytes_sent
     current_time = time.time()
-
-    if node.last_network_bytes == 0:
-        # First call — initialise baseline, report 0 Mbps
-        node.last_network_bytes = current_network_bytes
-        node.last_network_time = current_time
+    
+    if last_network_bytes == 0:
+        # First call, initialize values and return 0
+        last_network_bytes = current_network_bytes
+        last_network_time = current_time
         bandwidth_mbps = 0.0
     else:
-        delta_bytes = current_network_bytes - node.last_network_bytes
-        delta_time = current_time - node.last_network_time
-
+        delta_bytes = current_network_bytes - last_network_bytes
+        delta_time = current_time - last_network_time
+        
+        # Avoid division by zero
         if delta_time > 0:
             bandwidth_mbps = (delta_bytes * 8) / (delta_time * 1024 * 1024)
         else:
             bandwidth_mbps = 0.0
-
-        node.last_network_bytes = current_network_bytes
-        node.last_network_time = current_time
-
+            
+        last_network_bytes = current_network_bytes
+        last_network_time = current_time
+    
     # Calculate Storage (Usage %)
     storage_percent = psutil.disk_usage('/').percent
-
-    # Get process-specific CPU/memory (non-blocking cpu_percent avoids stalling
-    # the gossip thread; the first call returns 0.0 which is acceptable).
-    cpu_usage = node.node_process.cpu_percent(interval=None)
-    memory_usage = node.node_process.memory_percent()
-
+    
+    # Get current node-specific resource usage
+    # (Using non-blocking cpu_percent() to avoid hanging the gossip thread)
+    cpu_usage = node_process.cpu_percent(interval=None)
+    memory_usage = node_process.memory_percent()
+    
+    # Get current metric values
     current_metrics = {
         "cpu": cpu_usage,
         "memory": memory_usage,
         "network": bandwidth_mbps,
-        "storage": storage_percent,
+        "storage": storage_percent
     }
 
     # Apply VoI priority + delta filtering

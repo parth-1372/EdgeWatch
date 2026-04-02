@@ -114,23 +114,16 @@ def stop_node():
     return "OK"
 
 
-@gossip.route('/terminate', methods=['POST'])
+@gossip.route('/terminate', methods=['POST', 'GET'])
 def terminate_node():
     """
     Soft-kill endpoint called by the Chaos Engine dashboard.
-
-    Sets is_alive=False so the gossip loop exits on its next iteration, then
-    waits up to 3 seconds for the quiesced_event to confirm the loop has
-    actually stopped before returning TERMINATED to the caller.
-
-    POST-only: mutating node state via GET is a security/correctness anti-pattern
-    (browsers and intermediaries may replay GETs).
+    Instantly sets is_alive=False so the node stops gossiping and returns
+    500 to all peers on their next request, triggering their 3-strike
+    failure detector — no docker stop required.
     """
     node = Node.instance()
     node.is_alive = False
-    # Wait for start_gossiping's finally-block to fire (max 3 s)
-    if node.quiesced_event is not None:
-        node.quiesced_event.wait(timeout=3.0)
     return "TERMINATED"
 
 
