@@ -1,0 +1,134 @@
+Delete the duplicated entry document (lines 19-35).
+
+The file contains two complete HTML documents. The second block introduces a duplicate <!DOCTYPE html>, a duplicate #root mount point, and another /src/main.jsx bootstrap, while also reintroducing className in plain HTML (should be class). The Vite entry point must have a single document structure with one root container and one bootstrap script.
+
+Suggested fix
+Verification confirms: 2 DOCTYPE declarations (expected 1), 2 root div elements (expected 1), 2 className attributes in plain HTML (expected 0).
+
+🧰 Tools
+🤖 Prompt for AI Agents
+Verify each finding against the current code and only fix it if needed.
+
+In `@dashboard/client/index.html` around lines 19 - 35, Remove the duplicated HTML
+document block that repeats the DOCTYPE, head/body, the div id="root" mount
+point and the script src="/src/main.jsx"; keep only one complete HTML document;
+also change any plain HTML attributes named className to class (e.g., the <html
+className="dark"> and <body className="..."> occurrences) so the final file has
+a single <!DOCTYPE html>, one div id="root", one <script type="module"
+src="/src/main.jsx">, and uses class instead of className.
+
+
+Remove the legacy module body that still starts at Line 222.
+
+This refactor currently leaves two export default function App() declarations in the same module and repeats top-level bindings such as API_BASE and ipOnly. The new orchestrator never gets exercised because the file fails to parse first—ECMAScript modules cannot have multiple default exports or redeclared module-level bindings.
+
+🤖 Prompt for AI Agents
+Verify each finding against the current code and only fix it if needed.
+
+In `@dashboard/client/src/App.jsx` around lines 23 - 220, This file accidentally
+contains a duplicate legacy module body with a second "export default function
+App()" and repeated top-level bindings (e.g., API_BASE, ipOnly), which breaks
+parsing; remove the entire legacy duplicate module block so only the single
+current export default function App() and its unique bindings remain, delete the
+duplicate API_BASE and ipOnly declarations and any duplicated top-level
+variables/functions from the old body, and if the legacy orchestrator logic is
+needed, migrate only the required bits into the existing App (e.g., integrate
+any start/kill handlers like handleStart/handleKillNode into the retained App)
+rather than keeping two default exports.
+
+
+Drive convergence from active_target, not node_count - killedNodes.size.
+
+dashboard/client/src/hooks/useGossipSocket.js already persists the backend's adjusted active_target. Recomputing the target here can undercount after the orchestrator has already lowered it, so node colors and convergence bars can flip green too early after a kill.
+
+Suggested fix
+-    const activeNodeCount = Math.max((node_count || 1) - killedNodes.size, 1);
++    const activeNodeCount = node.active_target ?? Math.max((node_count || 1) - killedNodes.size, 1);
+@@
+-                  const activeNodeCount = Math.max((node.node_count || 1) - killedNodes.size, 1);
++                  const activeNodeCount = node.active_target ?? Math.max((node.node_count || 1) - killedNodes.size, 1);
+Also applies to: 156-162, 188-193
+
+🤖 Prompt for AI Agents
+Verify each finding against the current code and only fix it if needed.
+
+In `@dashboard/client/src/components/LiveTopologyGraph.jsx` around lines 28 - 39,
+The paintNode logic and the other similar places compute activeNodeCount by
+subtracting killedNodes.size from node_count, which can undercount when the
+backend already adjusted the target; change these to derive the convergence
+target from node.active_target (falling back to Math.max((node_count || 1) -
+killedNodes.size, 1) only if node.active_target is undefined), and use that
+value instead of activeNodeCount in the color/threshold comparisons; update the
+same pattern in the other occurrences referenced (around lines 156-162 and
+188-193) so all convergence/color logic consistently uses node.active_target
+when present.
+
+Reject failed config reads before calling setConfig.
+
+dashboard/api/server.js at Lines 38-51 returns { error, details } with status 500 on read failures. This hook currently accepts that payload as if it were a valid config object, which can render garbage sections and later POST them back into config.ini.
+
+Suggested fix
+   const fetchConfig = useCallback(async () => {
+     setLoading(true);
+     try {
+       const res  = await fetch(`${API_BASE}/config`);
+       const data = await res.json();
++      if (!res.ok) {
++        throw new Error(data.error || "Failed to load config");
++      }
+       setConfig(data);
+       setFetchError(null);
+     } catch (err) {
++      setConfig(null);
+       setFetchError(err.message);
+     } finally {
+       setLoading(false);
+     }
+   }, []);
+📝 Committable suggestion
+🤖 Prompt for AI Agents
+Verify each finding against the current code and only fix it if needed.
+
+In `@dashboard/client/src/hooks/useConfig.js` around lines 18 - 24, fetchConfig in
+useConfig currently accepts error payloads as valid config; update fetchConfig
+to reject non-OK responses and error payloads before calling setConfig: after
+the fetch, check res.ok (or res.status !== 200) and parse JSON, if the parsed
+object has an "error" (or non-null details) or the response status is not OK
+then setFetchError with that information (or throw) and do NOT call setConfig;
+only call setConfig when res.ok and parsed data is a valid config object. Also
+ensure setLoading is cleared in both success and failure paths. Reference:
+useConfig -> fetchConfig, setConfig, setFetchError, setLoading.
+
+
+
+Persist failureCount before checking the 3-strike threshold.
+
+f_count is derived here but never written back into hbState, so each failure starts again from the old stored value and this path never accumulates to 3.
+
+Suggested fix
+     def update_failure_data(self, new_time_key, n):
+         """Record a failed contact attempt against peer n (heartbeat / 3-strike)."""
+         peer_key = n["ip"] + ':' + n["port"]
+         own_key = self.ip + ':' + self.port
+         if own_key not in self.data[new_time_key].get(peer_key, {}).get("hbState", {}).get("failureList", []):
+-            self.data[new_time_key][peer_key]["hbState"]["failureList"].append(own_key)
+-            f_count = self.data[new_time_key].get(peer_key, {}).get("hbState", {}).get("failureCount", 0) + 1
++            hb_state = self.data[new_time_key].setdefault(peer_key, {}).setdefault("hbState", {})
++            hb_state.setdefault("failureList", []).append(own_key)
++            hb_state["failureCount"] = hb_state.get("failureCount", 0) + 1
++            f_count = hb_state["failureCount"]
+             if f_count >= 3:
+                 self.delete_node_from_nodelist(peer_key)
+                 self.data[new_time_key][peer_key]["hbState"]["nodeAlive"] = False
+🤖 Prompt for AI Agents
+Verify each finding against the current code and only fix it if needed.
+
+In `@src/app/node.py` around lines 402 - 410, The failureCount is computed into
+f_count but never persisted, so retries never accumulate; update hbState to
+store the new failureCount before checking the 3-strike threshold. In the method
+that records failed contact attempts (use symbols peer_key, own_key,
+self.data[new_time_key][peer_key]["hbState"], f_count and
+delete_node_from_nodelist), assign
+self.data[new_time_key][peer_key]["hbState"]["failureCount"] = f_count (ensuring
+the hbState dict and peer entry exist) and then check if f_count >= 3 to call
+delete_node_from_nodelist and set nodeAlive = False.

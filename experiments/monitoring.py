@@ -60,6 +60,7 @@ def execute_queries_from_queue():
                     conn.commit()
                     for _ in pending_items:
                         experiment.query_queue.task_done()
+                experiment.query_queue.task_done() # Mark poison-pill as done
                 break
 
             query, parameters = query_data
@@ -78,16 +79,18 @@ def execute_queries_from_queue():
             print("trace: {}".format(traceback.format_exc()))
             try:
                 conn.rollback()
-            except Exception:
-                pass
+            except Exception as e:
+                print("Error rollback db batch: {}".format(e))
+                print("trace: {}".format(traceback.format_exc()))
 
             # Recreate the cursor — a cursor after rollback can be in an
             # undefined state in SQLite's Python driver, leading to silent
             # failures on the very next execute() call.
             try:
                 cursor = conn.cursor()
-            except Exception:
-                pass
+            except Exception as e:
+                print("Error recreate cursor db batch: {}".format(e))
+                print("trace: {}".format(traceback.format_exc()))
 
             # Mark every pending item (already dequeued) as done so join()
             # callers are never left hanging.

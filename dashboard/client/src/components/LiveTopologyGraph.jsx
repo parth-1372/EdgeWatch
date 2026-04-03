@@ -30,7 +30,7 @@ export function LiveTopologyGraph({ graphData, onSelectNode, killedNodes, onKill
     const isSelected = selectedNodeId === node.id;
     const r          = isSelected ? 10 : 8;
     const { ic, node_count } = node;
-    const activeNodeCount = Math.max((node_count || 1) - killedNodes.size, 1);
+    const activeNodeCount = node.active_target || Math.max((node_count || 1) - killedNodes.size, 1);
 
     let color = "#64748b";
     if (isKilled) {
@@ -157,7 +157,7 @@ export function LiveTopologyGraph({ graphData, onSelectNode, killedNodes, onKill
                 .sort((a, b) => b.lastSeen - a.lastSeen)
                 .map(node => {
                   const isKilled       = killedNodes.has(node.id);
-                  const activeNodeCount = Math.max((node.node_count || 1) - killedNodes.size, 1);
+                  const activeNodeCount = node.active_target || Math.max((node.node_count || 1) - killedNodes.size, 1);
                   const isConverged    = node.ic >= activeNodeCount && node.ic > 0;
 
                   return (

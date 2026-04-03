@@ -17,11 +17,16 @@ export function useConfig() {
   // Fetch on mount
   const fetchConfig = useCallback(async () => {
     setLoading(true);
+    setFetchError(null);
     try {
-      const res  = await fetch(`${API_BASE}/config`);
+      const res = await fetch(`${API_BASE}/config`);
       const data = await res.json();
+
+      if (!res.ok || data.error) {
+        throw new Error(data.error || `Server returned ${res.status}`);
+      }
+
       setConfig(data);
-      setFetchError(null);
     } catch (err) {
       setFetchError(err.message);
     } finally {

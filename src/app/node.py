@@ -29,32 +29,23 @@ METRIC_DELTAS = {
     "storage": 10.0  # 10% change in storage
 }
 
-# Track last values to calculate deltas
-last_metric_values = {}
-# Track state for rate calculations
-last_network_bytes = 0
-last_network_time = time.time()
-# Track when each metric was last sent
-last_metric_sent_round = {}
-# Persistent process handle for efficient monitoring
-node_process = psutil.Process()
+
 
 def get_new_data():
-    global last_network_bytes, last_network_time
     node = Node.instance()
     
     # Calculate Bandwidth (Mbps)
     current_network_bytes = psutil.net_io_counters().bytes_recv + psutil.net_io_counters().bytes_sent
     current_time = time.time()
     
-    if last_network_bytes == 0:
+    if node.last_network_bytes == 0:
         # First call, initialize values and return 0
-        last_network_bytes = current_network_bytes
-        last_network_time = current_time
+        node.last_network_bytes = current_network_bytes
+        node.last_network_time = current_time
         bandwidth_mbps = 0.0
     else:
-        delta_bytes = current_network_bytes - last_network_bytes
-        delta_time = current_time - last_network_time
+        delta_bytes = current_network_bytes - node.last_network_bytes
+        delta_time = current_time - node.last_network_time
         
         # Avoid division by zero
         if delta_time > 0:
@@ -62,16 +53,16 @@ def get_new_data():
         else:
             bandwidth_mbps = 0.0
             
-        last_network_bytes = current_network_bytes
-        last_network_time = current_time
+        node.last_network_bytes = current_network_bytes
+        node.last_network_time = current_time
     
     # Calculate Storage (Usage %)
     storage_percent = psutil.disk_usage('/').percent
     
     # Get current node-specific resource usage
     # (Using non-blocking cpu_percent() to avoid hanging the gossip thread)
-    cpu_usage = node_process.cpu_percent(interval=None)
-    memory_usage = node_process.memory_percent()
+    cpu_usage = node.node_process.cpu_percent(interval=None)
+    memory_usage = node.node_process.memory_percent()
     
     # Get current metric values
     current_metrics = {
@@ -403,8 +394,9 @@ class Node:
         peer_key = n["ip"] + ':' + n["port"]
         own_key = self.ip + ':' + self.port
         if own_key not in self.data[new_time_key].get(peer_key, {}).get("hbState", {}).get("failureList", []):
-            self.data[new_time_key][peer_key]["hbState"]["failureList"].append(own_key)
+            self.data[new_time_key].setdefault(peer_key, {}).setdefault("hbState", {}).setdefault("failureList", []).append(own_key)
             f_count = self.data[new_time_key].get(peer_key, {}).get("hbState", {}).get("failureCount", 0) + 1
+            self.data[new_time_key][peer_key]["hbState"]["failureCount"] = f_count
             if f_count >= 3:
                 self.delete_node_from_nodelist(peer_key)
                 self.data[new_time_key][peer_key]["hbState"]["nodeAlive"] = False
