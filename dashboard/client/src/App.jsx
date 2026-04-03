@@ -20,7 +20,7 @@ import { SectionCard } from "./components/SectionCard";
 import { NodeInspector } from "./components/NodeInspector";
 import { LiveTopologyGraph } from "./components/LiveTopologyGraph";
 
-const API_BASE = "http://localhost:5000/api";
+const API_BASE = (import.meta.env.VITE_API_BASE || "") + "/api";
 
 /** Extract the IP portion from an "ip:port" string. */
 function ipOnly(nodeId) {
@@ -51,6 +51,7 @@ export default function App() {
   const [booting, setBooting] = useState(false);
   const [toast, setToast] = useState(null);
   const [selectedNodeId, setSelectedNodeId] = useState(null);
+  const [pendingKills, setPendingKills] = useState(new Set());
 
   // Fetch config on mount
   useEffect(() => { fetchConfig(); }, [fetchConfig]);
@@ -63,6 +64,9 @@ export default function App() {
 
   // ── Handlers ─────────────────────────────────────────────────────────────────
   const handleKillNode = useCallback(async (nodeId) => {
+    if (pendingKills.has(nodeId)) return;
+    
+    setPendingKills(prev => new Set(prev).add(nodeId));
     const ip = ipOnly(nodeId);
     const port = nodeId.includes(":") ? nodeId.split(":")[1] : "";
     try {
@@ -75,8 +79,14 @@ export default function App() {
       setToast({ message: `⚡ Node ${ip} terminated. Gossip peers will detect failure within 3 rounds.`, type: "success" });
     } catch (err) {
       setToast({ message: err.message, type: "error" });
+    } finally {
+      setPendingKills(prev => {
+        const next = new Set(prev);
+        next.delete(nodeId);
+        return next;
+      });
     }
-  }, [gossipKillNode]);
+  }, [gossipKillNode, pendingKills]);
 
   const onSave = useCallback(() => {
     handleSave(
@@ -99,24 +109,6 @@ export default function App() {
   }, []);
 
   // ── Render ────────────────────────────────────────────────────────────────────
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center font-mono text-slate-500">
-        <Spinner /> <span className="ml-3">Initializing Control Center...</span>
-      </div>
-    );
-  }
-
-  // Fetch failed — show error state instead of calling Object.entries(null)
-  // (CodeRabbit finding: null config causes TypeError at render time)
-  if (fetchError && !config) {
-    return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center font-mono text-red-500">
-        Failed to load configuration: {fetchError}
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen bg-[#020617] text-slate-100 selection:bg-violet-500/30 overflow-x-hidden">
       {/* Background décor */}
@@ -176,14 +168,34 @@ export default function App() {
         </div>
 
         {/* ── Config sections ──────────────────────────────────────────────────── */}
-        {/* Guard against null config (CodeRabbit fix) before calling Object.entries */}
-        {config && (
-          <section className="space-y-6 mb-12 shrink-0">
-            {Object.entries(config).map(([sk, sd]) => (
+        <section className="space-y-6 mb-12 shrink-0">
+          {loading ? (
+            <div className="rounded-3xl bg-slate-900/40 border border-slate-800/20 p-12 flex flex-col items-center justify-center gap-4">
+              <Spinner />
+              <span className="text-xs font-mono text-slate-500 uppercase tracking-widest">Querying Node Config...</span>
+            </div>
+          ) : fetchError && !config ? (
+            <div className="rounded-3xl bg-red-950/20 border border-red-500/20 p-12 flex flex-col items-center justify-center gap-4 text-center">
+              <svg className="w-8 h-8 text-red-500/50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+              <div>
+                <p className="text-red-400 font-bold text-sm mb-1">Configuration Offline</p>
+                <p className="text-red-500/60 font-mono text-[10px] uppercase tracking-wider">{fetchError}</p>
+              </div>
+              <button 
+                onClick={fetchConfig}
+                className="mt-2 px-4 py-2 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 text-[10px] font-black uppercase tracking-widest border border-red-500/20 transition-all"
+              >
+                Retry Connection
+              </button>
+            </div>
+          ) : config && (
+            Object.entries(config).map(([sk, sd]) => (
               <SectionCard key={sk} sectionKey={sk} sectionData={sd} onChange={handleChange} />
-            ))}
-          </section>
-        )}
+            ))
+          )}
+        </section>
 
         {/* ── Live Topology Graph ───────────────────────────────────────────────── */}
         <section className="mb-12">
@@ -191,6 +203,7 @@ export default function App() {
             graphData={graphData}
             onSelectNode={setSelectedNodeId}
             killedNodes={killedNodes}
+            pendingKills={pendingKills}
             onKillNode={handleKillNode}
             selectedNodeId={selectedNodeId}
           />

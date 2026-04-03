@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 
-const API_BASE = "http://localhost:5000/api";
+const API_BASE = (import.meta.env.VITE_API_BASE || "") + "/api";
 
 /**
  * useConfig — manages config.ini fetch, local edits, and save-back.
@@ -49,7 +49,21 @@ export function useConfig() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(config),
       });
-      if (!res.ok) throw new Error("Save error");
+
+      if (!res.ok) {
+        let errorMsg = "Save error";
+        try {
+          const errorData = await res.json();
+          errorMsg = errorData.error || errorData.details || errorMsg;
+        } catch (e) {
+          try {
+            const text = await res.text();
+            if (text) errorMsg = text;
+          } catch (e2) { /* ignore */ }
+        }
+        throw new Error(errorMsg);
+      }
+
       onSuccess?.("Configuration cached.");
     } catch (err) {
       onError?.(err.message);

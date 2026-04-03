@@ -12,17 +12,24 @@ import ForceGraph2D from "react-force-graph-2d";
  *   onKillNode     — callback(nodeId) to trigger Chaos Engine kill
  *   selectedNodeId — currently selected node ID or null
  */
-export function LiveTopologyGraph({ graphData, onSelectNode, killedNodes, onKillNode, selectedNodeId }) {
+export function LiveTopologyGraph({ graphData, onSelectNode, killedNodes, pendingKills, onKillNode, selectedNodeId }) {
   const graphRef = useRef();
 
   // Auto-fit the graph whenever the node count changes
   useEffect(() => {
+    let timerId = null;
     if (graphRef.current && graphData.nodes.length > 0) {
       const fg = graphRef.current;
       const centerForce = fg.d3Force("center");
       if (centerForce) centerForce.x(0).y(0);
-      setTimeout(() => fg.zoomToFit(400, 100), 150);
+      
+      timerId = setTimeout(() => {
+        fg.zoomToFit(400, 100);
+      }, 150);
     }
+    return () => {
+      if (timerId) clearTimeout(timerId);
+    };
   }, [graphData.nodes.length]);
 
   const paintNode = useCallback((node, ctx, globalScale) => {
@@ -198,14 +205,16 @@ export function LiveTopologyGraph({ graphData, onSelectNode, killedNodes, onKill
                       <td className="px-4 py-4 text-right pr-8" onClick={e => e.stopPropagation()}>
                         <button
                           onClick={() => onKillNode(node.id)}
-                          disabled={isKilled}
+                          disabled={isKilled || pendingKills.has(node.id)}
                           className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${
                             isKilled
                               ? "bg-red-500/10 text-red-700 border border-red-900/20"
-                              : "bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/30 hover:text-red-100 hover:border-red-500/50 active:scale-95"
+                              : pendingKills.has(node.id)
+                                ? "bg-amber-500/10 text-amber-500/50 border border-amber-500/20 cursor-wait"
+                                : "bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/30 hover:text-red-100 hover:border-red-500/50 active:scale-95"
                           }`}
                         >
-                          {isKilled ? "Terminated" : "Kill Node"}
+                          {isKilled ? "Terminated" : pendingKills.has(node.id) ? "Killing..." : "Kill Node"}
                         </button>
                       </td>
                     </tr>

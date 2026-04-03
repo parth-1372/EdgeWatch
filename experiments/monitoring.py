@@ -60,6 +60,7 @@ def execute_queries_from_queue():
                     conn.commit()
                     for _ in pending_items:
                         experiment.query_queue.task_done()
+                    pending_items = []
                 experiment.query_queue.task_done() # Mark poison-pill as done
                 break
 
@@ -74,12 +75,12 @@ def execute_queries_from_queue():
                     experiment.query_queue.task_done()
                 pending_items = []
 
-        except Exception as e:
+        except sqlite3.Error as e:
             print("Error db batch: {}".format(e))
             print("trace: {}".format(traceback.format_exc()))
             try:
                 conn.rollback()
-            except Exception as e:
+            except sqlite3.Error as e:
                 print("Error rollback db batch: {}".format(e))
                 print("trace: {}".format(traceback.format_exc()))
 
@@ -88,7 +89,7 @@ def execute_queries_from_queue():
             # failures on the very next execute() call.
             try:
                 cursor = conn.cursor()
-            except Exception as e:
+            except sqlite3.Error as e:
                 print("Error recreate cursor db batch: {}".format(e))
                 print("trace: {}".format(traceback.format_exc()))
 

@@ -196,6 +196,10 @@ class Node:
         self.push_mode = None
         self.is_send_data_back = None
         self.metric_last_sent = {}
+        
+        # Sessions — instance scope for experiment isolation
+        self.session_to_monitoring = requests.Session()
+        self.gossip_session = requests.Session()
 
         # VoI metric tracking — stored as instance attrs so they reset on re-init
         self.last_metric_values = {}
@@ -244,16 +248,27 @@ class Node:
         import threading
         self.quiesced_event = threading.Event()
 
+    def close_sessions(self):
+        """Explicitly close connection pools for this node."""
+        try:
+            if hasattr(self, 'session_to_monitoring'):
+                self.session_to_monitoring.close()
+            if hasattr(self, 'gossip_session'):
+                self.gossip_session.close()
+        except Exception:
+            pass
+
     def get_random_nodes(self, node_list, target_count):
         """Return a random sample of peers, excluding self."""
         filtered_nodes = [node for node in node_list if node['ip'] != self.ip]
-        return secrets.SystemRandom().sample(filtered_nodes, target_count)
+        if not filtered_nodes:
+            return []
+        sample_size = min(target_count, len(filtered_nodes))
+        return secrets.SystemRandom().sample(filtered_nodes, sample_size)
 
     def start_gossip_counter(self):
-        """Background thread: increments gossip_counter once per second."""
-        while self.is_alive:
-            self.gossip_counter += 1
-            time.sleep(1)
+        """OBSOLETE: Gossip counter is now driven by transmit()."""
+        pass
 
     def start_gossiping(self, target_count, gossip_rate):
         """Main gossip loop — runs until is_alive is set False."""
@@ -276,6 +291,8 @@ class Node:
 
     def transmit(self, target_count):
         """Build and send current state to target_count randomly selected peers."""
+        # Increment round ID (gossip counter) for every round to ensure freshness
+        self.gossip_counter += 1
         new_time_key = self.gossip_counter
 
         if self.data:
@@ -298,15 +315,15 @@ class Node:
         time_data = self.data[time_key]
         own_recent_data = time_data[own_key]
 
-        filtered_own_data = self.get_filtered_data_by_priority(own_recent_data)
-
+        # Use the already-decided own_recent_data from get_new_data directly
+        # to avoid double-filtering that undoes VoI/delta logic.
         metadata = {
             key: node_data['counter']
             for key, node_data in time_data.items()
             if key != own_key and 'counter' in node_data
         }
 
-        return {'metadata': metadata, own_key: filtered_own_data}
+        return {'metadata': metadata, own_key: own_recent_data}
 
     def prepare_requested_data(self, time_key, requested_keys):
         """Return the subset of stored data requested by a peer."""
@@ -357,16 +374,25 @@ class Node:
         if self.data:
             latest_time_key = max(self.data.keys())
             latest_data = self.data[latest_time_key]
-            to_send = self.data
-            self.data = {latest_time_key: latest_data}
+            to_send = self.data.copy()
             to_push = {k: v for k, v in to_send.items() if k != latest_time_key}
-            self.session_to_monitoring.post(
-                'http://{}:{}/push_data_to_database?ip={}&port={}&round={}'.format(
-                    self.monitoring_address, self.client_port,
-                    self.ip, self.port, self.cycle
-                ),
-                json=to_push,
-            )
+            
+            try:
+                res = self.session_to_monitoring.post(
+                    'http://{}:{}/push_data_to_database?ip={}&port={}&round={}'.format(
+                        self.monitoring_address, self.client_port,
+                        self.ip, self.port, self.cycle
+                    ),
+                    json=to_push,
+                    timeout=5
+                )
+                if res.status_code < 400:
+                    # Successful push, prune local history
+                    self.data = {latest_time_key: latest_data}
+                else:
+                    logger.error(f"[Prune] Push failed with status {res.status_code}. Retaining history.")
+            except Exception as e:
+                logger.error(f"[Prune] Push exception: {e}. Retaining history.")
 
     def send_to_node(self, n, new_time_key):
         """Push-pull gossip exchange with peer node n."""
@@ -381,25 +407,34 @@ class Node:
             response = self.gossip_session.get(
                 'http://' + n["ip"] + ':' + '5000' + '/receive_message?inc_round={}'.format(self.cycle),
                 json=requested_data, timeout=5)
+            
             self.update_own_data(r_metadata_and_updated.json()['updates'], new_time_key)
-            if response.status_code == 500:
+            if response.status_code >= 400:
                 self.update_failure_data(new_time_key, n)
             else:
                 self.reset_failure_data(new_time_key, n["ip"] + ':' + n["port"])
         except Exception as e:
             logging.error("Error while sending message to node {}: {}".format(n, e))
+            self.update_failure_data(new_time_key, n)
 
     def update_failure_data(self, new_time_key, n):
         """Record a failed contact attempt against peer n (heartbeat / 3-strike)."""
         peer_key = n["ip"] + ':' + n["port"]
         own_key = self.ip + ':' + self.port
-        if own_key not in self.data[new_time_key].get(peer_key, {}).get("hbState", {}).get("failureList", []):
-            self.data[new_time_key].setdefault(peer_key, {}).setdefault("hbState", {}).setdefault("failureList", []).append(own_key)
-            f_count = self.data[new_time_key].get(peer_key, {}).get("hbState", {}).get("failureCount", 0) + 1
-            self.data[new_time_key][peer_key]["hbState"]["failureCount"] = f_count
-            if f_count >= 3:
-                self.delete_node_from_nodelist(peer_key)
-                self.data[new_time_key][peer_key]["hbState"]["nodeAlive"] = False
+        hb_state = self.data[new_time_key].setdefault(peer_key, {}).setdefault("hbState", {})
+        
+        # Guard: only add own_key to failureList if not already there
+        failure_list = hb_state.setdefault("failureList", [])
+        if own_key not in failure_list:
+            failure_list.append(own_key)
+            
+        # Always increment failureCount on every reported failure
+        f_count = hb_state.get("failureCount", 0) + 1
+        hb_state["failureCount"] = f_count
+        
+        if f_count >= 3:
+            self.delete_node_from_nodelist(peer_key)
+            hb_state["nodeAlive"] = False
 
     def delete_node_from_nodelist(self, key_to_delete):
         """Remove a node from the gossip peer list (post 3 strikes)."""
@@ -417,6 +452,4 @@ class Node:
             self.data[new_time_key].setdefault(ip_key, {}).setdefault("hbState", {})["failureList"] = []
             self.data[new_time_key][ip_key]["hbState"]["nodeAlive"] = True
 
-    # Sessions — shared across all calls for connection re-use
-    session_to_monitoring = requests.Session()
-    gossip_session = requests.Session()
+    # Sessions — Moved to __init__ for instance scope
