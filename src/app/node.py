@@ -136,9 +136,10 @@ def should_send_metric(node, metric, value):
 
     # Delta calculation
     prev = node.last_metric_values[metric]
-    if isinstance(value, (int, float)) and isinstance(prev, (int, float)) and prev != 0:
+    if isinstance(value, (int, float)) and isinstance(prev, (int, float)):
         if metric in ("network", "storage"):
-            delta_percent = abs(value - prev) / max(value, prev) * 100
+            denom = max(abs(value), abs(prev))
+            delta_percent = 0.0 if denom == 0 else (abs(value - prev) / denom) * 100
         else:
             delta_percent = abs(value - prev)
     else:
