@@ -255,8 +255,8 @@ class Node:
                 self.session_to_monitoring.close()
             if hasattr(self, 'gossip_session'):
                 self.gossip_session.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"[Session] Error closing node sessions: {e}")
 
     def get_random_nodes(self, node_list, target_count):
         """Return a random sample of peers, excluding self."""

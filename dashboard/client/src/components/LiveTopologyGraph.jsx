@@ -196,7 +196,7 @@ export function LiveTopologyGraph({ graphData, onSelectNode, killedNodes, pendin
                           <div className="w-12 h-1 bg-slate-800 rounded-full overflow-hidden">
                             <div
                               className={`h-full ${isConverged ? "bg-emerald-500" : "bg-indigo-500"}`}
-                              style={{ width: `${(node.ic / activeNodeCount) * 100}%` }}
+                              style={{ width: `${Math.min(100, (node.ic / activeNodeCount) * 100)}%` }}
                             />
                           </div>
                           <span className="text-[10px] text-slate-500 font-mono">{node.ic}/{activeNodeCount}</span>
