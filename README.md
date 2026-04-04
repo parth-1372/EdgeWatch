@@ -1,65 +1,79 @@
-# PrioMon: Priority-Based Distributed Monitoring
+# PrioMon: Distributed Priority-Based Monitoring System
 
-PrioMon is a high-performance distributed monitoring system that utilizes a gossip protocol to propagate system metrics (CPU, Memory, Network, Storage) across a cluster of nodes. It features a unique **priority-based bandwidth-saving mechanism** that intelligently filters metrics based on their importance and the magnitude of data changes.
+PrioMon is a high-performance, decentralized monitoring system built for edge environments. It utilizes a custom **Gossip Protocol** to propagate system metrics (CPU, Memory, Network, Storage) across a cluster of nodes without a single point of failure.
 
-##  Key Features
+To optimize network bandwidth, PrioMon implements a unique **Value-of-Information (VoI) filtering mechanism** that drastically reduces redundant data transmission while ensuring critical status updates propagate instantly.
 
-- **Gossip Protocol Propagation**: Efficient data dissemination without a single point of failure.
-- **Priority Filtering**: Reduces bandwidth usage by up to 100x by prioritizing critical status updates and skipping redundant ones.
-- **Node Resilience**: Automatic failure detection and handling of dead nodes.
-- **SSD Optimized**: Uses SQLite WAL (Write-Ahead Logging) to protect your hardware during intensive high-frequency simulations.
-- **Integrated Analytics**: Built-in plotting tools to visualize convergence time, success rates, and bandwidth savings.
+## 🚀 Key Engineering Features
 
-##  Project Structure
+- **Decentralized Gossip Protocol**: Efficient data dissemination avoiding bottlenecks of centralized masters.
+- **Bandwidth Optimization (VoI)**: Reduces network payload by up to 100x by prioritizing significant metric changes and critical state transitions.
+- **High-Performance Storage**: Utilizes SQLite with WAL (Write-Ahead Logging) to sustain high-frequency simulation writes without hardware degradation.
+- **Containerized Architecture**: Fully Dockerized node clusters for scalable deployment and testing.
+- **Full-Stack Dashboard**: Integrated React/Node.js web dashboard for real-time monitoring and analytics visualization.
+- **Fault Tolerance**: Automatic detection and handling of dead nodes via Leaderless Quorum Consensus (LQC).
+
+## 🛠️ Tech Stack
+
+- **Core Engine**: Python 3.9+
+- **Backend API**: Node.js, Express
+- **Frontend**: React, Tailwind CSS, Vite
+- **Database**: SQLite (WAL optimized)
+- **Deployment & Orchestration**: Docker, Docker Compose
+
+## 📂 Project Structure
 
 ```text
 PrioMon/
-├── src/               # Core Gossip Engine implementation
-│   ├── app/           # Dockerized node logic (priomon.py, node.py)
-│   └── query_client.py # Client-side query bridge
-├── experiments/       # Simulation Orchestration & Analysis
-│   ├── monitoring.py  # Central experiment runner & monitoring server
-│   ├── plot.py        # Analytics visualization tool
-│   └── config.ini     # Simulation parameters
-├── docker-compose.yml # Service definitions for building the node cluster
-└── requirements.txt   # Orchestrator dependencies (Python)
+├── src/               # Core Gossip Engine & Node implementation (Python)
+├── dashboard/         # Full-stack monitoring dashboard
+│   ├── api/           # Node.js backend server
+│   └── client/        # React frontend application
+├── experiments/       # Simulation orchestrator, database schemas, and analytics
+├── docker-compose.yml # Container orchestration for the node cluster
+└── README.md
 ```
 
-##  Quick Start
+## 🏁 Quick Start
 
 ### 1. Prerequisites
-- Python 3.9+ 
 - Docker & Docker Compose
-- A virtual environment (recommended)
+- Python 3.9+
+- Node.js & npm (for dashboard)
 
-### 2. Installation
-```powershell
-# Clone the repository
-git clone <repo-url>
-cd PrioMon
-
-# Install dependencies
-pip install -r requirements.txt
+### 2. Build and Run the Gossip Cluster
+Spin up the decentralized nodes using Docker Compose:
+```bash
+docker-compose up --build -d
 ```
 
-### 3. Running the Simulation
-1.  **Build the Node Image**:
-    ```powershell
-    docker-compose up --build -d
-    ```
-2.  **Start the Orchestrator**:
-    ```powershell
-    python experiments/monitoring.py
-    ```
-3.  **Trigger the Experiment**:
-    Open your browser and navigate to `http://localhost:4000/start`.
+### 3. Start the Simulation Orchestrator
+In a virtual environment, install the requirements and run the monitoring server:
+```bash
+pip install -r requirements.txt
+python experiments/monitoring.py
+```
 
-### 4. Visualizing Results
-After the simulation finishes, run the plotting tool:
-```powershell
+### 4. Launch the Dashboard
+Start the API and Client to visualize the cluster in real-time:
+```bash
+# Terminal 1: Start API
+cd dashboard/api
+npm install
+npm start
+
+# Terminal 2: Start Client
+cd dashboard/client
+npm install
+npm run dev
+```
+
+Navigate to the provided localhost URL (usually `http://localhost:5173`) to view the dashboard. To trigger the simulated workloads, visit `http://localhost:4000/start`.
+
+## 📊 Analytics & Visualization
+
+PrioMon includes built-in tools to measure convergence time, success rates, and bandwidth savings. After running a simulation, generate the performance charts:
+```bash
 python experiments/plot.py
 ```
-This will generate PNG charts in the `experiments/` directory.
-
-##  Configuration
-Tweak the parameters in `experiments/config.ini` to change node counts, gossip rates, or metric priorities.
+This will output PNG charts in the `experiments/` directory demonstrating the efficiency of the VoI filtering algorithm.

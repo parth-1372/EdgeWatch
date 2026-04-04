@@ -1,0 +1,39 @@
+AE Comments:
+Based on reviewers’ comments, while the VoI-based extension of DEMon is viewed as potentially interesting, the manuscript does not convincingly establish its architectural novelty nor provide sufficient methodological detail to support the experimental claims. The evaluation lacks clarity on implementation, workload configuration, and deployment conditions, and key aspects such as actual transmission reduction under heartbeat operation, VoI parameterization, overhead, and scalability are not rigorously substantiated.
+
+
+Reviewer: 1
+
+Comments to the Author
+This paper presents a Resource-Aware Decentralized Monitoring framework for edge environments that combines a stochastic gossip-based dissemination with a Value-of-Information (VoI) based priority filtering and a Leaderless Quorum Consensus (LQC) to enable reliable, centralized-free monitoring.
+1. The evaluation is mainly simulation-based and lacks real-world validation on diverse edge hardware and network conditions, which casts doubt on the battery-life and scalability claims.
+2. The VoI parameters (\delta p, kp) and the priority tiers (HIGH/MEDIUM/LOW) are underspecified, with no systematic method or sensitivity analysis for setting them or adapting them to workloads.
+3. Security and trust are not rigorously addressed; there is no explicit threat model, Byzantine fault tolerance discussion, or mechanisms beyond a lightweight LQC for defending against adversarial behavior.
+4. The paper does not quantify the computational and energy overhead of running the VoI decision logic and metadata processing, which could offset bandwidth savings on very resource-constrained nodes.
+5. Large-scale deployment and long-term stability remain unproven, with no ablation studies or comparisons across different workloads, topologies, or dynamic conditions beyond the presented results.
+
+Reviewer: 2
+
+Comments to the Author
+In this manuscript, the authors propose a method for reducing the transmission attempts and energy consumption in a decentralized edge monitor. The proposed approach is based on the DEMon architecture which was previously presented in IEEE-UCC in 2022 ([8] in the manuscript). As DEMon, they use gossip protocol. The reduction is aimed to be achieved by transferring a metric only when it is important enough to be transferred.
+
+The benefit of the proposal is questionable.
+- The JSON data model proposed in DEMon is slightly modified to clearly separate app-state from the metadata. Unfortunately sending one metric does not yield too much savings compared to transferring the app-state. This is due to the size of the metadata: digest is a hash-value which is more than 128 bits for Merkle trees* and timestamp is 32 or 64 bits. On the other hand, app-data need not be very big. If float is used for each field in app-data and counter is negligible, the reduction is about 25% for a single metric (cpu) transfer which is the best case for the proposal.
+- Further reduction could have been achieved only if transfers are significantly reduced. Hence VoI-based filtering could have achieved this. However, Alg. 1 is not sufficient. The first part of if condition at line 10 shows a heartbeat transfer. Hence, if there is no priority in a metric, the system still sends it at each heartbeat signal. If there exists a priority or a major change in a metric, then Alg. 1 shows that the transfer is done earlier. Hence, the system does not reduce the transfers. Instead, it initiates additional transfers whenever a metric is prioritized or changes significantly.
+
+Based on the above observations, the reviewer thinks that experiments show only a single metric transfer. This does not show a regular edge behavior because heartbeat transfer will require all metrics to get transferred.
+
+* Merkle trees are widely used in the gossip protocol. Since the authors have not mentioned another digest type, the reviewer has assumed this.
+
+
+Reviewer: 3
+
+Comments to the Author
+While I think the augmentation of DEMon with the Value of Information (VoI) principle is a sound idea and the results look promising, the authors do not clearly make a distinction between already existing work and their own contribution. As an example: Fig. 1 seems very similar to the proposed architecture as the suggested reference, although it is not explicitly cited or mentioned in the letter. Same thing applies to Fig. 2, which displays nearly the same structure as DEMon.
+From the letter it seems like the work introduces an augmented DEMon (as the Introduction and also Fig 1 display) and presents it in a way that could be interpreted as a new framework (with a similar architecture). At that point it is unclear, why it should been seen as a architecturally distinct system.
+I believe this distinction could also be clarified if the authors went into more detail about the methodology of the experiments carried out, i.e., whether a separate/new system was tested here or the DEMon framework with VoI on top.
+This brings me to my next point of concern, which is that it was not clear from the presentation of the work how the experiments were conducted, which makes it much more difficult to understand.
+I cannot see which experiment was carried out for Fig. 3. The scalability is clearly shown, but information on the process is missing: X nodes send Y transmissions, but in what time frame or in how many rounds, and in a constant environment or in combination with other loads (where VoI would be more efficient)? This information would help to better understand the significance of the reduction and contribution.
+Since the other results seem to be based primarily on the empirically conducted experiment shown in Fig. 4 and the other results represent this in more detail (cf. Fig. 5) or are based on it mathematically (cf. Figs. 6, 7, 8), the implementation should be explained in more detail answering questions like the previous, but also the following: Do the nodes run as containers on a physical machine?
+
+I think this work could make a great contribution, if it clarifies the own novelty more and gives more information about the experiments conducted. Reduction of the overhead of gossip-based approaches is critical in future applications and the VoI concept could reduce this overhead significantly.

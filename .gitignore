@@ -8,3 +8,5 @@ __pycache__/
 *.pyi
 notes.md
 node_modules/
+./Reviewer_Comment.txt
+./edgewatch_research_codebase.md

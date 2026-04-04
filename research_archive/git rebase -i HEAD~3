@@ -1,0 +1,54 @@
+[33m9986a6d[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mfeature-review[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m, [m[1;32mmain[m[33m)[m feat: add chaos engine kill switch and live VoI metrics inspector
+[33m0992bee[m feat: add live network graph with real-time streaming via WebSocket
+[33m5d6d79f[m feat: complete Phase 1 dashboard with config editing and experiment control
+[33mbfda97e[m Replaced with PrioMon code
+[33m7a4ccef[m Refactor: Minimal EdgeWatch workspace for VoI simulation research (March 2026 Baseline)
+[33mb05b71c[m Dashboard done
+[33m7ce6704[m massive cleanup, removed all the bloat and focused on emulsion experiment
+[33ma784c0f[m fixed circular import issue
+[33me1528a1[m experiment runner complete, can finally test this thing properly
+[33m14ce0cf[m wrote readme explaining the voi concept
+[33m142ed2b[m node implementation with metric collection and gossip, needs testing
+[33m3e69f2b[m implemented voi filtering logic, this took forever lol
+[33mbb5bf9d[m added config for metric priorities, copied some settings from demon
+[33m966cd61[m started emulsion experiment folder, testing voi idea from demon
+[33mce45f37[m docs: Add comprehensive monitoring access guide and quick reference
+[33mc608c38[m Add runtime components
+[33m207cab3[m Complete documentation
+[33m08c0631[m Add docs
+[33m77bfc9f[m Add comprehensive documentation structure and overview
+[33mb038d42[m Add comprehensive monitoring configuration and Grafana dashboards
+[33m18f3d83[m Add structured logging and audit trail system
+[33m0831b67[m Add comprehensive health monitoring system
+[33meb33eb9[m Add comprehensive audit logging and trail system
+[33m0d01ff4[m Add comprehensive health monitoring system
+[33m0adadac[m Add Prometheus integration and monitoring configuration
+[33m7123728[m Add experimental framework and experiment manager
+[33mff95ee2[m Add comprehensive alerting and notification system
+[33mfd403cd[m Add performance monitoring and resource tracking
+[33m685c8f3[m Add advanced metrics collection system
+[33m515e87a[m Implement comprehensive container networking and security
+[33maa701ca[m Add production deployment optimization and performance tuning
+[33m7f28d4b[m Create comprehensive health checks and monitoring for containers
+[33m23597c5[m Add environment configuration management system
+[33m553d8e0[m Implement deployment scripts and automation
+[33m2680f58[m Add container orchestration with Docker Compose
+[33mdae6162[m Create Docker containerization setup
+[33m7112d92[m Create comprehensive monitoring dashboard with real-time metrics
+[33m6a8d0b2[m Add adaptive communication protocol optimization
+[33m933e9d8[m Implement comprehensive error handling and recovery system
+[33m63eb1a0[m Add REST API endpoints for monitoring and management
+[33m4d9ba45[m implement query interface for data retrieval
+[33me5435ad[m create database connectivity and storage
+[33m01b7f90[m add gossip protocol communication layer
+[33m9db5670[m implement main EdgeWatch daemon service
+[33m4b01ad1[m enhance edge node initialization and integration
+[33mf8a2028[m implement logging and utilities
+[33mabbd301[m add core module documentation
+[33m6658d18[m add project dependencies
+[33m8563b23[m add configuration manager singleton
+[33m332cb39[m implement edge node architecture
+[33mcafeec9[m add project configuration and gitignore
+[33m178b8f4[m add project README and overview
+[33m4110e03[m initialize EdgeWatch project structure
+[33m178daa4[m Initial commit
