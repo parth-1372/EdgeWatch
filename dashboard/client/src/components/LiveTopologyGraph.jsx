@@ -22,7 +22,7 @@ export function LiveTopologyGraph({ graphData, onSelectNode, killedNodes, pendin
       const fg = graphRef.current;
       const centerForce = fg.d3Force("center");
       if (centerForce) centerForce.x(0).y(0);
-      
+
       timerId = setTimeout(() => {
         fg.zoomToFit(400, 100);
       }, 150);
@@ -35,81 +35,106 @@ export function LiveTopologyGraph({ graphData, onSelectNode, killedNodes, pendin
   const paintNode = useCallback((node, ctx, globalScale) => {
     const isKilled   = killedNodes.has(node.id);
     const isSelected = selectedNodeId === node.id;
-    const r          = isSelected ? 10 : 8;
+    const isPending  = pendingKills?.has(node.id);
+    const r          = isSelected ? 11 : 8;
     const { ic, node_count } = node;
     const activeNodeCount = node.active_target || Math.max((node_count || 1) - killedNodes.size, 1);
 
     let color = "#64748b";
-    if (isKilled) {
-      color = "#475569";
-    } else if (ic > 0) {
-      color = ic >= activeNodeCount ? "#10b981" : "#6366f1";
+    if (isKilled)       color = "#475569";
+    else if (isPending) color = "#f59e0b";
+    else if (ic > 0)    color = ic >= activeNodeCount ? "#10b981" : "#6366f1";
+
+    // Outer glow ring (selected or converged)
+    if (!isKilled) {
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, r + 6, 0, 2 * Math.PI);
+      ctx.fillStyle = isSelected ? `${color}30` : `${color}15`;
+      ctx.fill();
     }
 
-    // Glow halo
-    ctx.beginPath();
-    ctx.arc(node.x, node.y, r + 4, 0, 2 * Math.PI);
-    ctx.fillStyle = isKilled ? "transparent" : `${color}22`;
-    ctx.fill();
-
-    // Main node disc
+    // Node disc
     ctx.beginPath();
     ctx.arc(node.x, node.y, r, 0, 2 * Math.PI);
     ctx.fillStyle = isKilled ? "transparent" : color;
     ctx.fill();
 
     // Border
-    ctx.strokeStyle = isKilled ? "#ef444466" : isSelected ? "#fff" : "rgba(255,255,255,0.3)";
-    ctx.lineWidth   = isKilled ? 2 : isSelected ? 3 : 1;
-    ctx.setLineDash(isKilled ? [2, 1] : []);
+    ctx.strokeStyle = isKilled ? "#ef444440" : isSelected ? "#fff" : `${color}80`;
+    ctx.lineWidth   = isKilled ? 1.5 : isSelected ? 2.5 : 1.5;
+    ctx.setLineDash(isKilled ? [3, 2] : []);
     ctx.stroke();
     ctx.setLineDash([]);
 
     // Label
-    const labelSize = Math.max(10 / globalScale, 3);
-    ctx.font         = `${isKilled ? "italic " : ""}${labelSize}px "JetBrains Mono", Inter, sans-serif`;
+    const labelSize = Math.max(9 / globalScale, 3);
+    ctx.font         = `${isKilled ? "italic " : "600 "}${labelSize}px Inter, sans-serif`;
     ctx.textAlign    = "center";
     ctx.textBaseline = "top";
-    ctx.fillStyle    = isKilled ? "#64748b" : isSelected ? "#fff" : "rgba(226, 232, 240, 0.9)";
-    ctx.fillText(node.label || node.id, node.x, node.y + r + 3);
+    ctx.fillStyle    = isKilled ? "#475569" : isSelected ? "#fff" : "rgba(203, 213, 225, 0.9)";
+    ctx.fillText(node.label || node.id, node.x, node.y + r + 4);
 
-    // Killed ✕ marker
+    // Killed ✕
     if (isKilled) {
-      ctx.font      = `${labelSize * 0.8}px monospace`;
+      ctx.font      = `bold ${labelSize * 0.9}px monospace`;
       ctx.fillStyle = "#ef4444";
-      ctx.fillText("✕", node.x, node.y - r / 1.5);
+      ctx.fillText("✕", node.x, node.y - r * 0.5);
     }
-  }, [killedNodes, selectedNodeId]);
 
-  const nodeCount = graphData.nodes.length;
-  const linkCount = graphData.links.length;
+    // Pending kill indicator
+    if (isPending && !isKilled) {
+      ctx.font      = `bold ${labelSize * 0.9}px monospace`;
+      ctx.fillStyle = "#f59e0b";
+      ctx.fillText("⚡", node.x, node.y - r * 0.5);
+    }
+  }, [killedNodes, selectedNodeId, pendingKills]);
+
+  const nodeCount   = graphData.nodes.length;
+  const linkCount   = graphData.links.length;
+  const aliveCount  = nodeCount - killedNodes.size;
 
   return (
-    <div className="rounded-3xl bg-slate-800/40 border border-slate-700/50 backdrop-blur-md overflow-hidden shadow-2xl">
+    <div className="glass rounded-3xl border border-white/6 overflow-hidden shadow-2xl">
+
       {/* Graph header */}
-      <div className="bg-gradient-to-r from-slate-900/80 to-slate-900 px-8 py-5 flex items-center justify-between border-b border-white/5">
-        <div className="flex items-center gap-4">
-          <div className="flex -space-x-1">
-            <div className="w-3 h-3 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
-            <div className="w-3 h-3 rounded-full bg-indigo-500/50" />
+      <div className="px-6 py-4 flex items-center justify-between border-b border-white/5 bg-gradient-to-r from-slate-900/60 to-transparent">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center">
+            <svg className="w-4 h-4 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17H3a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v10a2 2 0 01-2 2h-2" />
+            </svg>
           </div>
-          <h2 className="text-white font-bold text-lg tracking-tight">Network Health Topology</h2>
+          <div>
+            <h2 className="text-white font-bold text-sm tracking-tight">Network Topology</h2>
+            <p className="text-[10px] text-slate-500 font-medium">Live force-directed cluster graph</p>
+          </div>
         </div>
-        <div className="flex items-center gap-6 text-slate-400 text-xs font-mono font-medium">
-          <div className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/5">
-            <span className="text-slate-500 mr-1.5">Nodes:</span>{nodeCount}
-          </div>
-          <div className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/5">
-            <span className="text-slate-500 mr-1.5">Links:</span>{linkCount}
-          </div>
+        <div className="flex items-center gap-2">
+          {[
+            { label: "Nodes",  value: nodeCount,  color: "text-indigo-400" },
+            { label: "Active", value: aliveCount,  color: "text-emerald-400" },
+            { label: "Links",  value: linkCount,  color: "text-cyan-400" },
+          ].map(({ label, value, color }) => (
+            <div key={label} className="glass px-3 py-1.5 rounded-lg text-center min-w-[60px]">
+              <p className={`text-sm font-mono font-black ${color}`}>{value}</p>
+              <p className="text-[9px] text-slate-600 font-medium uppercase tracking-wider">{label}</p>
+            </div>
+          ))}
         </div>
       </div>
 
       {/* Force graph canvas */}
-      <div className="relative" style={{ height: 500, background: "radial-gradient(circle at center, #0f172a 0%, #020617 100%)" }}>
+      <div
+        className="relative"
+        style={{ height: 480, background: "radial-gradient(ellipse at 50% 50%, #0d1b2e 0%, #020617 70%)" }}
+      >
         {nodeCount === 0 ? (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <p className="text-slate-500 font-mono text-sm animate-pulse">Awaiting data stream from orchestrator...</p>
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
+            <svg className="w-10 h-10 text-slate-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0" />
+            </svg>
+            <p className="text-slate-600 font-mono text-xs animate-pulse">Awaiting orchestrator data stream...</p>
+            <p className="text-slate-700 text-[10px]">Boot the network to begin</p>
           </div>
         ) : (
           <ForceGraph2D
@@ -118,22 +143,22 @@ export function LiveTopologyGraph({ graphData, onSelectNode, killedNodes, pendin
             nodeCanvasObject={paintNode}
             nodePointerAreaPaint={(node, color, ctx) => {
               ctx.beginPath();
-              ctx.arc(node.x, node.y, 12, 0, 2 * Math.PI);
+              ctx.arc(node.x, node.y, 14, 0, 2 * Math.PI);
               ctx.fillStyle = color;
               ctx.fill();
             }}
             onNodeClick={node => onSelectNode(node.id)}
             linkColor={link =>
               killedNodes.has(link.source.id) || killedNodes.has(link.target.id)
-                ? "rgba(239, 68, 68, 0.05)"
-                : "rgba(56, 189, 248, 0.1)"
+                ? "rgba(239, 68, 68, 0.04)"
+                : "rgba(99, 102, 241, 0.15)"
             }
             linkWidth={1.5}
             linkDirectionalParticles={2}
-            linkDirectionalParticleWidth={2}
-            linkDirectionalParticleColor={() => "rgba(56, 189, 248, 0.3)"}
-            backgroundColor="#020617"
-            height={500}
+            linkDirectionalParticleWidth={2.5}
+            linkDirectionalParticleColor={() => "rgba(99, 102, 241, 0.5)"}
+            backgroundColor="transparent"
+            height={480}
             cooldownTicks={100}
             d3AlphaDecay={0.01}
             d3VelocityDecay={0.3}
@@ -141,80 +166,106 @@ export function LiveTopologyGraph({ graphData, onSelectNode, killedNodes, pendin
         )}
       </div>
 
+      {/* Legend bar */}
+      <div className="px-6 py-3 border-t border-white/5 bg-slate-950/30 flex items-center gap-6">
+        {[
+          { color: "bg-emerald-500",  label: "Converged"  },
+          { color: "bg-indigo-500",   label: "Gossiping"  },
+          { color: "bg-amber-500",    label: "Pending Kill" },
+          { color: "bg-red-500/40 border border-red-500/40", label: "Terminated" },
+        ].map(({ color, label }) => (
+          <div key={label} className="flex items-center gap-2">
+            <div className={`w-2.5 h-2.5 rounded-full ${color}`} />
+            <span className="text-[10px] text-slate-500 font-medium">{label}</span>
+          </div>
+        ))}
+        <div className="ml-auto text-[10px] text-slate-700 font-mono">Click a node to inspect</div>
+      </div>
+
       {/* Diagnostic table */}
-      <div className="border-t border-white/5 bg-slate-950/20">
-        <div className="px-8 py-3 bg-slate-900/40 border-b border-white/5">
+      <div className="border-t border-white/5">
+        <div className="px-6 py-3 flex items-center justify-between bg-slate-900/40 border-b border-white/5">
           <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">Live Diagnostic Feed</h3>
+          <span className="text-[10px] font-mono text-slate-700">{Object.keys(graphData.nodes_info || {}).length} nodes tracked</span>
         </div>
-        <div className="max-h-[350px] overflow-y-auto custom-scrollbar">
+        <div className="max-h-[320px] overflow-y-auto custom-scrollbar">
           <table className="w-full text-left border-collapse">
-            <thead className="sticky top-0 bg-slate-900/95 backdrop-blur-md text-[10px] text-slate-500 uppercase font-mono border-b border-white/5">
+            <thead className="sticky top-0 bg-slate-900/95 backdrop-blur-md text-[9px] text-slate-600 uppercase font-black border-b border-white/5">
               <tr>
-                <th className="px-8 py-4 font-black">Node Endpoint</th>
-                <th className="px-4 py-4 font-black">Round</th>
-                <th className="px-4 py-4 font-black">ND</th>
-                <th className="px-4 py-4 font-black">Data</th>
-                <th className="px-4 py-4 font-black">Health</th>
-                <th className="px-4 py-4 font-black">Convergence</th>
-                <th className="px-4 py-4 font-black text-right pr-8">Actions</th>
+                <th className="px-6 py-3 tracking-widest">Node Endpoint</th>
+                <th className="px-4 py-3 tracking-widest">Round</th>
+                <th className="px-4 py-3 tracking-widest">Peers</th>
+                <th className="px-4 py-3 tracking-widest">Data</th>
+                <th className="px-4 py-3 tracking-widest">Health</th>
+                <th className="px-4 py-3 tracking-widest">Convergence</th>
+                <th className="px-4 py-3 tracking-widest text-right pr-6">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-white/5">
+            <tbody className="divide-y divide-white/[0.04]">
               {Object.values(graphData.nodes_info || {})
                 .sort((a, b) => b.lastSeen - a.lastSeen)
                 .map(node => {
                   const isKilled       = killedNodes.has(node.id);
                   const activeNodeCount = node.active_target || Math.max((node.node_count || 1) - killedNodes.size, 1);
                   const isConverged    = node.ic >= activeNodeCount && node.ic > 0;
+                  const isPending      = pendingKills?.has(node.id);
 
                   return (
                     <tr
                       key={node.id}
-                      className={`group transition-all hover:bg-white/5 cursor-pointer ${isKilled ? "opacity-40 grayscale" : ""}`}
+                      className={`group transition-all duration-150 cursor-pointer ${
+                        isKilled ? "opacity-40" : "hover:bg-white/[0.025]"
+                      } ${selectedNodeId === node.id ? "bg-indigo-500/5" : ""}`}
                       onClick={() => onSelectNode(node.id)}
                     >
-                      <td className="px-8 py-4 whitespace-nowrap">
-                        <div className="flex items-center gap-3">
-                          <div className={`w-2 h-2 rounded-full ${isKilled ? "bg-red-500" : isConverged ? "bg-emerald-500" : "bg-indigo-500"}`} />
-                          <span className="text-slate-200 font-mono text-xs group-hover:text-white">{node.id}</span>
+                      <td className="px-6 py-3.5 whitespace-nowrap">
+                        <div className="flex items-center gap-2.5">
+                          <div className={`w-2 h-2 rounded-full shrink-0 ${
+                            isKilled ? "bg-red-500/60" : isConverged ? "bg-emerald-500" : isPending ? "bg-amber-500 animate-pulse" : "bg-indigo-500 animate-pulse"
+                          }`} />
+                          <span className="text-slate-300 font-mono text-[11px] group-hover:text-white transition-colors">{node.id}</span>
                         </div>
                       </td>
-                      <td className="px-4 py-4 font-mono text-xs text-slate-400">{node.round}</td>
-                      <td className="px-4 py-4 font-mono text-xs text-slate-400">{node.nd}</td>
-                      <td className="px-4 py-4 font-mono text-xs text-slate-400">{((node.bytes_of_data || 0) / 1024).toFixed(1)} KB</td>
-                      <td className="px-4 py-4">
+                      <td className="px-4 py-3.5 font-mono text-[11px] text-slate-500">{node.round ?? 0}</td>
+                      <td className="px-4 py-3.5 font-mono text-[11px] text-slate-500">{node.nd ?? 0}</td>
+                      <td className="px-4 py-3.5 font-mono text-[11px] text-slate-500">{((node.bytes_of_data || 0) / 1024).toFixed(1)} KB</td>
+                      <td className="px-4 py-3.5">
                         {(node.strikes || 0) > 0 ? (
-                          <span className={`text-[10px] font-mono font-bold px-2 py-1 rounded ${node.strikes >= 3 ? "text-red-500 bg-red-500/10" : "text-amber-500 bg-amber-500/10 animate-pulse"}`}>
-                            {node.strikes >= 3 ? "AMPUTATED" : `STRIKES: ${node.strikes}/3`}
+                          <span className={`text-[9px] font-mono font-black px-2 py-0.5 rounded-md ${
+                            node.strikes >= 3
+                              ? "text-red-400 bg-red-500/10 border border-red-500/20"
+                              : "text-amber-400 bg-amber-500/10 border border-amber-500/20 animate-pulse"
+                          }`}>
+                            {node.strikes >= 3 ? "DEAD" : `${node.strikes}/3 ⚠`}
                           </span>
                         ) : (
-                          <span className="text-[10px] font-mono font-bold text-emerald-500/80">HEALTHY</span>
+                          <span className="text-[9px] font-mono font-black text-emerald-500/70">HEALTHY</span>
                         )}
                       </td>
-                      <td className="px-4 py-4">
-                        <div className="flex items-center gap-3">
-                          <div className="w-12 h-1 bg-slate-800 rounded-full overflow-hidden">
+                      <td className="px-4 py-3.5">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-14 h-1 bg-slate-800 rounded-full overflow-hidden">
                             <div
-                              className={`h-full ${isConverged ? "bg-emerald-500" : "bg-indigo-500"}`}
+                              className={`h-full rounded-full transition-all duration-500 ${isConverged ? "bg-emerald-500" : "bg-indigo-500"}`}
                               style={{ width: `${Math.min(100, (node.ic / activeNodeCount) * 100)}%` }}
                             />
                           </div>
-                          <span className="text-[10px] text-slate-500 font-mono">{node.ic}/{activeNodeCount}</span>
+                          <span className="text-[10px] text-slate-600 font-mono">{node.ic}/{activeNodeCount}</span>
                         </div>
                       </td>
-                      <td className="px-4 py-4 text-right pr-8" onClick={e => e.stopPropagation()}>
+                      <td className="px-4 py-3.5 text-right pr-6" onClick={e => e.stopPropagation()}>
                         <button
                           onClick={() => onKillNode(node.id)}
-                          disabled={isKilled || pendingKills.has(node.id)}
-                          className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${
+                          disabled={isKilled || isPending}
+                          className={`px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all duration-200 ${
                             isKilled
-                              ? "bg-red-500/10 text-red-700 border border-red-900/20"
-                              : pendingKills.has(node.id)
-                                ? "bg-amber-500/10 text-amber-500/50 border border-amber-500/20 cursor-wait"
-                                : "bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/30 hover:text-red-100 hover:border-red-500/50 active:scale-95"
+                              ? "bg-red-500/5 text-red-900 border border-red-900/10 cursor-default"
+                              : isPending
+                                ? "bg-amber-500/10 text-amber-500/60 border border-amber-500/20 cursor-wait"
+                                : "bg-red-500/8 text-red-500 border border-red-500/15 hover:bg-red-500/20 hover:text-red-300 hover:border-red-500/40 active:scale-95"
                           }`}
                         >
-                          {isKilled ? "Terminated" : pendingKills.has(node.id) ? "Killing..." : "Kill Node"}
+                          {isKilled ? "Dead" : isPending ? "Killing..." : "Kill"}
                         </button>
                       </td>
                     </tr>
@@ -222,6 +273,11 @@ export function LiveTopologyGraph({ graphData, onSelectNode, killedNodes, pendin
                 })}
             </tbody>
           </table>
+          {Object.keys(graphData.nodes_info || {}).length === 0 && (
+            <div className="py-12 flex items-center justify-center">
+              <p className="text-slate-700 font-mono text-xs">No nodes detected yet</p>
+            </div>
+          )}
         </div>
       </div>
     </div>
