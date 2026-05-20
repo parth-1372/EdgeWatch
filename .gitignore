@@ -11,3 +11,4 @@ __pycache__/
 notes.md
 node_modules/
 dashboard/client/dist/
+docs/performance_defense_guide.md
